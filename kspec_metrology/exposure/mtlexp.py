@@ -1,6 +1,8 @@
 from kspec_metrology.exposure.qhyccd import QHY_Camera
 import numpy as np
 from astropy.io import fits
+from pathlib import Path
+import json
 
 def mtlexp(exptime
            , readmode=1
@@ -10,6 +12,10 @@ def mtlexp(exptime
            , nexposure=1
            , data_dir='./data/'):
     
+    current_file_path = Path(__file__).resolve().parents[3]
+    print(current_file_path)
+
+
     qc = QHY_Camera()
     qc.sdk.InitQHYCCDResource()
     qc.OpenCam()
