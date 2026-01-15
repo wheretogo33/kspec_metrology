@@ -67,7 +67,47 @@ def transform(x, y, coeff):
 
     return xout, yout
 
+def dedupe_peaks_kdtree(peak_table: Table, min_dist: float) -> Table:
+    """
+    peak_table: photutils.find_peaks 결과 (x_peak, y_peak, peak_value 컬럼 포함)
+    min_dist  : 같은 소스군으로 간주할 최소 거리(픽셀)
+    반환값    : 중복 제거된 Table (원본 메타 유지)
+    """
 
+    # 배열 추출
+    x = np.asarray(peak_table['x_peak'], dtype=float)
+    y = np.asarray(peak_table['y_peak'], dtype=float)
+    v = np.asarray(peak_table['peak_value'], dtype=float)
+
+    n = x.size
+    if n == 0:
+        return peak_table.copy()
+
+    # 더 밝은 순서(내림차순)로 처리 → 이 순서로 선택하면 주변 약한 피크를 지움
+    order = np.argsort(-v)
+
+    pts = np.column_stack((x, y))
+    tree = cKDTree(pts)
+
+    keep = np.ones(n, dtype=bool)
+    selected_idx = []
+
+    for idx in order:
+        if not keep[idx]:
+            continue
+        # 이 피크는 채택
+        selected_idx.append(idx)
+        # min_dist 이내 이웃(자기 자신 포함)
+        neighbors = tree.query_ball_point(pts[idx], r=min_dist)
+        # 자신보다 어두운 이웃들을 제거(우리는 내림차순으로 돌고 있으므로 이웃은 항상 같거나 더 어둠)
+        for nb in neighbors:
+            if nb == idx:
+                continue
+            keep[nb] = False
+
+    selected_idx = np.array(selected_idx, dtype=int)
+    selected_idx.sort()  # 원하면 원래 순서로 복원하려면 주석 해제/유지 선택
+    return peak_table[selected_idx]
 
 def z2(x,y):
     return x
