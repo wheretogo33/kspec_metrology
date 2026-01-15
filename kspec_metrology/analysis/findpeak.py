@@ -21,13 +21,14 @@ def findpeak(npeaks
     #---Stack "nframe" Image----------------------------------------------------------------------------------------------------------
     im = np.zeros((8842, 11760))
     for iframe in range(nexposure):
-        im += fits.getdata(data_dir + f'test{iframe}.fits').astype(np.float64) / nexposure
+        im += fits.getdata(data_dir + f'test{iframe}.fits').astype(np.float64)[::-1,:] / nexposure
 
 
     #---Find Peaks Using any method---------------------------------------------------------------------------------------------------    
     log.info("Start finding peaks with %s", mode)
     if mode == "Raw":
-        peak_table = find_peaks(im, threshold=threshold, box_size=boxsize, npeaks=npeaks)
+        peak_table_raw = find_peaks(im, threshold=threshold, box_size=boxsize)
+        peak_table = dedupe_peaks_kdtree(peak_table_raw, min_dist=40)
         xf, yf = peak_table['x_peak'].data, peak_table['y_peak'].data   
         log.info(f"Found {xf.size} peaks")
         if xf.size > npeaks:
