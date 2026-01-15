@@ -48,7 +48,7 @@ def findpeak(npeaks
     if SaveFiberImage:
         im_crop_full = np.zeros( (npeaks, nwindow*2, nwindow*2))
 
-    for ifiber in range(npeaks):
+    for ifiber in range(xf.size):
         if mode != "Predict":
             ipredict = np.argmin( np.abs(xchip[xf[ifiber]]-xchip) )
             jpredict = np.argmin( np.abs(ychip[yf[ifiber]]-ychip) )
