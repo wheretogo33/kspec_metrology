@@ -4,6 +4,7 @@ from kspec_metrology.analysis.utils import transform_polynomial, transform, came
 
 def fitdistortion(x, y, fid_flag
                   , xobs, yobs
+                  , xorigin, yorigin
                   , imatch, theta_guess):
 
     xobs_match = xobs[imatch]
@@ -25,4 +26,7 @@ def fitdistortion(x, y, fid_flag
     dx = xfocal_obs-x
     dy = yfocal_obs-y
 
+    theta, phi = 
+
+                    
     return xfocal_obs, yfocal_obs, dx, dy, inv_popt_obs
