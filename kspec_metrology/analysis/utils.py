@@ -109,6 +109,50 @@ def dedupe_peaks_kdtree(peak_table: Table, min_dist: float) -> Table:
     selected_idx.sort()  # 원하면 원래 순서로 복원하려면 주석 해제/유지 선택
     return peak_table[selected_idx]
 
+def find_angle_double_method2(ori_x, ori_y, target_x_ori, target_y_ori):
+    """
+    MATLAB:
+      function [theta, phi] = find_anlge_double_method2(ori_x,ori_y,target_x_ori,target_y_ori,Positioner_arm1,Positioner_arm2)
+
+    반환:
+      theta, phi (라디안)
+    """
+    arm1 = 5.2
+    arm2 = 11.6
+    
+    Positioner_p = arm1 + arm2
+
+    target_x = target_x_ori - ori_x
+    target_y = target_y_ori - ori_y
+
+    distant = float(np.hypot(target_x, target_y))
+    theta_gamma = float(np.arctan2(target_y, target_x))  # [-pi, pi]
+
+    # MATLAB 분기 그대로
+    if distant >= Positioner_p:
+        theta = theta_gamma
+        phi = 0.0
+
+    elif distant <= (arm2 - arm1):
+        theta = theta_gamma + np.pi
+        phi = np.pi
+
+    else:
+        # acos 인자 수치오차 방지용 clamp
+        arg = (distant**2 - arm1**2 - arm2**2) / (-2.0 * arm1 * arm2)
+        arg = float(np.clip(arg, -1.0, 1.0))
+
+        theta_beta = float(np.arccos(arg))
+        phi = float(np.pi - theta_beta)
+
+        theta_alpha = float(np.arctan2(arm2 * np.sin(phi), arm1 + arm2 * np.cos(phi)))
+        theta = float(theta_gamma - theta_alpha)
+
+        if theta < 0.0:
+            theta = float(2.0 * np.pi + theta)
+
+    return theta, phi
+
 def z2(x,y):
     return x
 
