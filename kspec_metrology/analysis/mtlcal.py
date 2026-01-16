@@ -5,8 +5,11 @@ from kspec_metrology.analysis.fitdistortion import fitdistortion
 
 def mtlcal(data_dir='./MTL/data/'):
     # Load Fiber positions and Fiducial flag------------------------------------------------
-    x, y, fid_flag = np.load(data_dir+"pos.npy")
-    fid_flag = fid_flag.astype(bool)
+    #x, y, fid_flag = np.load(data_dir+"pos.npy")
+    #fid_flag = fid_flag.astype(bool)
+    
+    
+    
     npeaks = x.size
 
     _, xobs, yobs = findpeak(npeaks)
