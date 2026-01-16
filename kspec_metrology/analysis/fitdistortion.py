@@ -1,12 +1,14 @@
 import numpy as np
 from scipy.optimize import curve_fit
 from kspec_metrology.analysis.utils import transform_polynomial, transform, camera2focal_coeff
+from kspec_metrology.logging.log import get_logger
 
 def fitdistortion(x, y, fid_flag
                   , xobs, yobs
                   , xorigin, yorigin
                   , imatch, theta_guess):
-
+    log = get_logger()
+                    
     xobs_match = xobs[imatch]
     yobs_match = yobs[imatch]
 
@@ -36,8 +38,8 @@ def fitdistortion(x, y, fid_flag
       theta_obs[i], phi_obs[i] = find_angle_double_method2(xorigin[i], yorigin[i],
                                                            xfocal_obs[i], yfocal_obs[i] )
     theta_new, phi_new = (theta_true + theta_true - theta_obs), (phi_true + phi_true, phi_obs)
-    print(theta_new[~fid_flag], phi_new[~fid_flag])
+    log.info(f"Alpha arm : {theta_new[~fid_flag]}, Beta arm : {phi_new[~fid_flag]}")
                     
-    print(dx*1e3, dy*1e3)
+    log.info(f"x offset : {dx*1e3} um, y offset : {dy*1e3} um")
                     
     return xfocal_obs, yfocal_obs, dx, dy, theta_true, phi_true, theta_new, phi_new, inv_popt_obs
