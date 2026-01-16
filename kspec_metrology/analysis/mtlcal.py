@@ -13,6 +13,6 @@ def mtlcal(data_dir='./MTL/data/'):
 
     imatch, theta_guess = matchfiber(x, y, xobs, yobs)
 
-    _, _, dx, dy, _, _, theta_new, phi_new, _ = fitdistortion(x, y, fid_flag, xobs, yobs, imatch, theta_guess)
+    _, _, dx, dy, _, _, theta_new, phi_new, _ = fitdistortion(x, y, fid_flag, xobs, yobs, xorigin, yorigin, imatch, theta_guess)
 
     return dx, dy, theta_new, phi_new 
