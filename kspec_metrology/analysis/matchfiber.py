@@ -30,6 +30,7 @@ def matchfiber(x, y
             dd_sum[ihunt] += dd[ipeak][obs_flag[ii[ipeak]] == 1].min()
 
     theta_guess = theta_grid[dd_sum.argmin()]
+    log.info(f"Estimated rotation angle: {theta_guess}")
 
     xobs_rot = np.cos(theta_guess)*xobs - np.sin(theta_guess)*yobs
     yobs_rot = np.sin(theta_guess)*xobs + np.cos(theta_guess)*yobs
@@ -48,6 +49,7 @@ def matchfiber(x, y
 
     xobs_rot += offset_grid[imin]
     yobs_rot += offset_grid[jmin]
+    log.info(f"Estimated offset : ({offset_grid[imin]}, {offset_grid[jmin]})")
     #==========================================================================
                  
     pos_tot = np.concatenate( (np.vstack((x, y)).T
