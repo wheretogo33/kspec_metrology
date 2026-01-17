@@ -16,12 +16,14 @@ def mtlcal(data_dir='./MTL/data/'):
            'I9' , 'K3', 'K6',
            'L10', 'M7'
           ]
-    
+    nfib = len(ids)
     
     fid_ids = tab["ID"][tab["FiducialFlag"] == 1]
     pick_ids = list(dict.fromkeys(list(ids)) + list(fid_ids))
-    
-    #pick_ids.remove('Z0')
+
+    remove_list = ['A0', 'Z1', 'Z4', 'Z10']
+    for item in remove_list:
+        pick_ids.remove(item)
     
     xy_map = {r["ID"]: (r["X"], r["Y"]) for r in tab}
     xy = np.array([xy_map[i] for i in pick_ids], dtype=float)
@@ -29,7 +31,7 @@ def mtlcal(data_dir='./MTL/data/'):
     
     x, y = np.copy(xorigin), np.copy(yorigin)
     fid_flag = np.zeros(x.size, dtype=bool)
-    fid_flag[14:] = True
+    fid_flag[nfib:] = True
     
     #---------------------------------------------------------------
     x[~fid_flag] += 16.8
@@ -38,7 +40,7 @@ def mtlcal(data_dir='./MTL/data/'):
     with open('./target/object.info', 'r') as ff:
         target = json.load(ff)
         xall, yall = target['xp'], target['yp']
-    x[:14], y[:14] = xall[:14], yall[:14]
+    x[:nfib], y[:nfib] = xall[:nfib], yall[:nfib]
 
 
     #---------------------------------------------------------------
