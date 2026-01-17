@@ -37,7 +37,7 @@ def mtlcal(data_dir='./MTL/data/'):
     #---------------------------------------------------------------
     with open('./target/object.info', 'r') as ff:
         target = json.load(ff)
-        xall, yall = target['x'], target['y']
+        xall, yall = target['xp'], target['yp']
     x[:14], y[:14] = xall[:14], yall[:14]
 
 
