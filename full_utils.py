@@ -134,7 +134,11 @@ def Match_Fiber(x, y
                 , xobs_raw, yobs_raw
                 , nbuffer):
 
-    coeff_temp = camera2focal_coeff
+    coeff_temp = np.copy(camera2focal_coeff)
+    coeff_temp[1] = np.pi / 12.
+    coeff_temp[2] = 15.
+    coeff_temp[3] = -3.
+                    
     xobs, yobs = transform(xobs_raw, yobs_raw, coeff_temp)
 
     nhunt = 720
