@@ -1,5 +1,5 @@
 import numpy as np
-
+from astropy.table import Table
 
 def com(im_crop, x_crop, y_crop):
     xsum = np.sum(im_crop, axis=0)
