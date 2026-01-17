@@ -19,7 +19,7 @@ def mtlcal(data_dir='./MTL/data/'):
     nfib = len(ids)
     
     fid_ids = tab["ID"][tab["FiducialFlag"] == 1]
-    pick_ids = list(dict.fromkeys(list(ids)) + list(fid_ids))
+    pick_ids = list(dict.fromkeys(list(ids) + list(fid_ids)))
 
     remove_list = ['A0', 'Z1', 'Z4', 'Z10']
     for item in remove_list:
