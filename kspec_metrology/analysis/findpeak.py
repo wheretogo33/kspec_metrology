@@ -1,7 +1,6 @@
 import numpy as np
 from photutils.detection import find_peaks
 from astropy.io import fits
-from astropy.table import Table
 from kspec_metrology.analysis.utils import com
 from kspec_metrology.logging.log import get_logger
 
