@@ -6,7 +6,7 @@ from kspec_metrology.logging.log import get_logger
 def fitdistortion(x, y, fid_flag
                   , xobs, yobs
                   , xorigin, yorigin
-                  , imatch, theta_guess):
+                  , imatch, theta_guess, xoff_guess, yoff_guess):
     log = get_logger()
                     
     xobs_match = xobs[imatch]
@@ -18,6 +18,8 @@ def fitdistortion(x, y, fid_flag
     
     coeff_temp = np.copy(camera2focal_coeff)
     coeff_temp[1] = theta_guess
+    coeff_temp[2] = xoff_guess
+    coeff_temp[3] = yoff_guess
     inv_popt_obs, _ = curve_fit(transform_polynomial, (xfit, yfit), ccd_fit
                        , maxfev=10000
                        , p0=coeff_temp
