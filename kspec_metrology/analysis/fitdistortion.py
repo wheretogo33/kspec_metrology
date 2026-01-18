@@ -40,8 +40,5 @@ def fitdistortion(x, y, fid_flag
       theta_obs[i], phi_obs[i] = find_angle_double_method2(xorigin[i], yorigin[i],
                                                            xfocal_obs[i], yfocal_obs[i] )
     theta_new, phi_new = (theta_true + theta_true - theta_obs), (phi_true + phi_true - phi_obs)
-    log.info(f"Alpha arm : {theta_new[~fid_flag]}, Beta arm : {phi_new[~fid_flag]}")
-                    
-    log.info(f"x offset : {dx*1e3} um, y offset : {dy*1e3} um")
                     
     return xfocal_obs, yfocal_obs, dx, dy, theta_true, phi_true, theta_new, phi_new, inv_popt_obs
