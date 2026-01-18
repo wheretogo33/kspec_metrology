@@ -30,8 +30,10 @@ def fitdistortion(x, y, fid_flag
     dx = xfocal_obs-x
     dy = yfocal_obs-y
 
+    
     theta_true, phi_true = np.full(x.size, 1e99), np.full(x.size, 1e99)
     theta_obs, phi_obs = np.full(x.size, 1e99), np.full(x.size, 1e99)
+    """
     for i in range(x.size):
       if fid_flag[i]:
         continue
@@ -39,6 +41,7 @@ def fitdistortion(x, y, fid_flag
                                                              x[i], y[i])
       theta_obs[i], phi_obs[i] = find_angle_double_method2(xorigin[i], yorigin[i],
                                                            xfocal_obs[i], yfocal_obs[i] )
+    """
     theta_new, phi_new = (theta_true + theta_true - theta_obs), (phi_true + phi_true - phi_obs)
                     
     return xfocal_obs, yfocal_obs, dx, dy, theta_true, phi_true, theta_new, phi_new, inv_popt_obs
