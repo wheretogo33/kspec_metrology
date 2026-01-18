@@ -24,6 +24,7 @@ camera2focal_coeff = np.array([-8.5, 0.
 
 def transform_polynomial(xin
                , m
+               , x0, y0
                , theta
                , r1x, r2x, r3x, r4x
                , t1x, t2x, t3x
@@ -53,7 +54,7 @@ def transform_polynomial(xin
             + a3y*z9(x,y)
             )
 
-    new = np.concatenate((xnew, ynew))
+    new = np.concatenate((xnew - x0, ynew - y0))
 
     return new
 
