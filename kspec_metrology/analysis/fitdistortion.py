@@ -21,7 +21,7 @@ def fitdistortion(x, y, fid_flag
     coeff_temp[2] = xoff_guess
     coeff_temp[3] = yoff_guess
     inv_popt_obs, _ = curve_fit(transform_polynomial, (xfit, yfit), ccd_fit
-                       , maxfev=10000
+                       , maxfev=20000
                        , p0=coeff_temp
                        )
 
