@@ -5,7 +5,7 @@ from kspec_metrology.logging.log import get_logger
 
 def matchfiber(x, y
                , xobs_raw, yobs_raw
-               , nbuffer=10):
+               , nbuffer=20):
     log = get_logger()
 
     coeff_temp = np.copy(camera2focal_coeff)
