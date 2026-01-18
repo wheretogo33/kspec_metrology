@@ -12,12 +12,12 @@ def com(im_crop, x_crop, y_crop):
     return xcom, ycom
 
 
-focal2camera_coeff = np.array([-1.18e-1, 0.
+focal2camera_coeff = np.array([-1.18e-1, 0., 0., 0.
                             , -1e-4 , -1e-8 , -1e-10, -1e-13
                             ,  1e-7 ,  1e-11, -1e-1
                             , -1e-10, -1e-10,  1e-8 , -1e-8])
 
-camera2focal_coeff = np.array([-8.5, 0. 
+camera2focal_coeff = np.array([-8.5, 0., 0., 0.
                             , 1e-6 , 1e-11,  1e-16, 1e-20
                             , 1e-8 , 1e-11, -1e-3 
                             , 1e-14, 1e-14, -1e-10, 1e-10])
