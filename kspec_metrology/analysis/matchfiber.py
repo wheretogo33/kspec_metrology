@@ -69,4 +69,4 @@ def matchfiber(x, y
         log.warning("Fiber matching is not unique")
         # log about which number of fibers are not matched
 
-    return imatch, theta_guess, (offset_grid[imin], offset_grid[jmin])
+    return imatch, (coeff_temp[1]+theta_guess), (offset_grid[imin], offset_grid[jmin])
