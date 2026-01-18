@@ -38,8 +38,8 @@ def matchfiber(x, y
     xobs_rot = np.cos(theta_guess)*xobs - np.sin(theta_guess)*yobs
     yobs_rot = np.sin(theta_guess)*xobs + np.cos(theta_guess)*yobs
 
-    ngrid = 41
-    offset_grid = np.linspace(-10., 10., ngrid)
+    ngrid = 81
+    offset_grid = np.linspace(-20., 20., ngrid)
     dsum_temp = np.zeros((ngrid, ngrid))
     for i in range(ngrid):
         for j in range(ngrid):
