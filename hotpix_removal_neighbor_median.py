@@ -1,3 +1,5 @@
+from scipy.ndimage import maximum_filter, median_filter
+
 def hot_pixel_removal_median_ratio(
     img: np.ndarray,
     factor: float = 5.0,            # 주변 median의 몇 배 이상이면 제거할지
