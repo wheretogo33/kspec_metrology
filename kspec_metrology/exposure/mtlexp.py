@@ -10,7 +10,8 @@ def mtlexp(exptime
            , gain=10
            , offset=30
            , nexposure=1
-           , data_dir='./MTL/data/'):
+           , data_dir='./MTL/data/'
+           , head='test'):
     
     current_file_path = Path(__file__).resolve().parents[3]
     print(current_file_path)
@@ -33,6 +34,6 @@ def mtlexp(exptime
         hdr['texp'] = exptime
 
         empty_primary = fits.PrimaryHDU(header=hdr, data=im)
-        empty_primary.writeto(data_dir+f'test{i}.fits', overwrite=True)
+        empty_primary.writeto(data_dir+f'{head}{i}.fits', overwrite=True)
 
     qc.CamExit()
