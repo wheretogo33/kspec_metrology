@@ -242,4 +242,4 @@ def Fiducial_findpeak(npeaks
     if SaveFiberImage:
         np.save(data_dir+f'fiberimage.npy', im_crop_full)
 
-    return im, xobs, yobs
+    return im_short, im_long, xobs, yobs
