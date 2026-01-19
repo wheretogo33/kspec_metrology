@@ -1,7 +1,7 @@
 import numpy as np
 from photutils.detection import find_peaks
 from astropy.io import fits
-from kspec_metrology.analysis.utils import com, dedupe_peaks_kdtree
+from kspec_metrology.analysis.utils import com, dedupe_peaks_kdtree, merge_peaks_kdtree
 from kspec_metrology.logging.log import get_logger
 
 def findpeak(npeaks
