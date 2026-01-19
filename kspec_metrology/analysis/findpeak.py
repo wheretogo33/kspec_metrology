@@ -3,8 +3,6 @@ from photutils.detection import find_peaks
 from astropy.io import fits
 from kspec_metrology.analysis.utils import com, dedupe_peaks_kdtree
 from kspec_metrology.logging.log import get_logger
-from astropy.table import Table
-from scipy.spatial import cKDTree
 
 def findpeak(npeaks
             , data_dir='./MTL/data/'
@@ -74,101 +72,6 @@ def findpeak(npeaks
 
     return im, xobs, yobs
 
-
-
-
-def merge_peaks_kdtree(t1, t2, tol=1.0,
-                       xcol='x_peak', ycol='y_peak', vcol='peak_value',
-                       sat_value=65534):
-
-    xy1 = np.vstack([t1[xcol], t1[ycol]]).T.astype(float)
-    xy2 = np.vstack([t2[xcol], t2[ycol]]).T.astype(float)
-
-    tree2 = cKDTree(xy2)
-    dist12, j = tree2.query(xy1, k=1)
-
-    tree1 = cKDTree(xy1)
-    dist21, i_back = tree1.query(xy2, k=1)
-
-    # mutual nearest neighbor + 거리 제한
-    mutual = (dist12 <= tol) & (i_back[j] == np.arange(len(xy1)))
-
-    i1 = np.where(mutual)[0]
-    i2 = j[mutual]
-
-    used2 = np.zeros(len(t2), dtype=bool)
-    used2[i2] = True
-
-    # --- 여기서부터 리스트에 쌓고 마지막에 Table 만들면 dtype 문제 100% 해결 ---
-    xs, ys, peaks = [], [], []
-    chosens = []
-    peak_t1s, peak_t2s = [], []
-    sat_t1s, sat_t2s = [], []
-
-    # matched pairs
-    for a, b in zip(i1, i2):
-        p1 = float(t1[vcol][a])
-        p2 = float(t2[vcol][b])
-        sat1 = (p1 == sat_value)
-        sat2 = (p2 == sat_value)
-
-        if sat1 and (not sat2):
-            chosen = 't2'
-        elif sat2 and (not sat1):
-            chosen = 't1'
-        elif (not sat1) and (not sat2):
-            chosen = 't1' if (p1 >= p2) else 't2'
-        else:
-            # 둘 다 sat이면 더 어두운 쪽(더 작은 값) 선택
-            chosen = 't1' if (p1 <= p2) else 't2'
-
-        if chosen == 't1':
-            x, y, peak = float(t1[xcol][a]), float(t1[ycol][a]), p1
-        else:
-            x, y, peak = float(t2[xcol][b]), float(t2[ycol][b]), p2
-
-        xs.append(x); ys.append(y); peaks.append(peak)
-        chosens.append(chosen)
-        peak_t1s.append(p1); peak_t2s.append(p2)
-        sat_t1s.append(sat1); sat_t2s.append(sat2)
-
-    # unmatched from t1
-    matched1 = np.zeros(len(t1), dtype=bool)
-    matched1[i1] = True
-    for a in np.where(~matched1)[0]:
-        p1 = float(t1[vcol][a])
-        xs.append(float(t1[xcol][a]))
-        ys.append(float(t1[ycol][a]))
-        peaks.append(p1)
-        chosens.append('t1')
-        peak_t1s.append(p1); peak_t2s.append(np.nan)
-        sat_t1s.append(p1 == sat_value); sat_t2s.append(False)
-
-    # unmatched from t2
-    for b in np.where(~used2)[0]:
-        p2 = float(t2[vcol][b])
-        xs.append(float(t2[xcol][b]))
-        ys.append(float(t2[ycol][b]))
-        peaks.append(p2)
-        chosens.append('t2')
-        peak_t1s.append(np.nan); peak_t2s.append(p2)
-        sat_t1s.append(False); sat_t2s.append(p2 == sat_value)
-
-    out = Table()
-    out['x'] = np.array(xs, dtype=float)
-    out['y'] = np.array(ys, dtype=float)
-    out['peak'] = np.array(peaks, dtype=float)
-
-    out['chosen'] = np.array(chosens, dtype='U2')
-
-    out['peak_t1'] = np.array(peak_t1s, dtype=float)
-
-
-    out['peak_t2'] = np.array(peak_t2s, dtype=float)
-    out['sat_t1']  = np.array(sat_t1s, dtype=bool)
-    out['sat_t2']  = np.array(sat_t2s, dtype=bool)
-
-    return out
 
 def Fiducial_findpeak(npeaks
             , data_dir='./MTL/data/'
