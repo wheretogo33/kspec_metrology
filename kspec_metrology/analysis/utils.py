@@ -2,6 +2,7 @@ import numpy as np
 from astropy.table import Table
 from scipy.spatial import cKDTree
 
+
 def com(im_crop, x_crop, y_crop):
     xsum = np.sum(im_crop, axis=0)
     ysum = np.sum(im_crop, axis=1)
@@ -17,15 +18,15 @@ focal2camera_coeff = np.array([-1.18e-1, 0., 0., 0.
                             ,  1e-7 ,  1e-11, -1e-1
                             , -1e-10, -1e-10,  1e-8 , -1e-8])
 
-camera2focal_coeff = np.array([-8.5, 0., 0., 0.
+camera2focal_coeff = np.array([-8.5, 0. , 0., 0.
                             , 1e-6 , 1e-11,  1e-16, 1e-20
                             , 1e-8 , 1e-11, -1e-3 
                             , 1e-14, 1e-14, -1e-10, 1e-10])
 
 def transform_polynomial(xin
                , m
-               , x0, y0
                , theta
+               , x0, y0
                , r1x, r2x, r3x, r4x
                , t1x, t2x, t3x
                , a1x, a2y, a4x, a3y
@@ -54,7 +55,7 @@ def transform_polynomial(xin
             + a3y*z9(x,y)
             )
 
-    new = np.concatenate((xnew - x0, ynew - y0))
+    new = np.concatenate((xnew-x0, ynew-y0))
 
     return new
 
@@ -111,47 +112,59 @@ def dedupe_peaks_kdtree(peak_table: Table, min_dist: float) -> Table:
     selected_idx.sort()  # 원하면 원래 순서로 복원하려면 주석 해제/유지 선택
     return peak_table[selected_idx]
 
-def find_angle_double_method2(ori_x, ori_y, target_x_ori, target_y_ori):
-    """
-    MATLAB:
-      function [theta, phi] = find_anlge_double_method2(ori_x,ori_y,target_x_ori,target_y_ori,Positioner_arm1,Positioner_arm2)
 
-    반환:
-      theta, phi (라디안)
+def find_angle_double_method2_elbow_down(
+    ori_x, ori_y,
+    target_x_ori, target_y_ori
+):
     """
-    arm1 = 5.2
-    arm2 = 11.6
-    
+    elbow-down 해만 반환:
+      phi(=beta) >= 0 (0~pi)
+      theta는 [0, 2pi)로 정규화
+
+    반환: theta, phi (rad)
+    """
+    arm1 = 5.2; arm2 = 11.6
     Positioner_p = arm1 + arm2
 
+    # base 기준 상대좌표
     target_x = target_x_ori - ori_x
     target_y = target_y_ori - ori_y
 
-    distant = float(np.hypot(target_x, target_y))
-    theta_gamma = float(np.arctan2(target_y, target_x))  # [-pi, pi]
+    d = float(np.hypot(target_x, target_y))
+    gamma = float(np.arctan2(target_y, target_x))  # [-pi, pi]
 
-    # MATLAB 분기 그대로
-    if distant >= Positioner_p:
-        theta = theta_gamma
+    # ---- 도달 불가능: 너무 멀면 완전 펼침(phi=0) ----
+    if d >= Positioner_p:
+        theta = gamma
         phi = 0.0
 
-    elif distant <= (arm2 - arm1):
-        theta = theta_gamma + np.pi
+    # ---- 도달 불가능: 너무 가까우면 완전 접힘(phi=pi) ----
+    elif d <= abs(arm2 - arm1):
+        theta = gamma + np.pi
         phi = np.pi
 
+    # ---- 도달 가능: elbow-down (phi in [0,pi]) ----
     else:
-        # acos 인자 수치오차 방지용 clamp
-        arg = (distant**2 - arm1**2 - arm2**2) / (-2.0 * arm1 * arm2)
+        # 원래 MATLAB 그대로: phi = beta in [0,pi]
+        arg = (d**2 - arm1**2 - arm2**2) / (-2.0 * arm1 * arm2)
         arg = float(np.clip(arg, -1.0, 1.0))
 
         theta_beta = float(np.arccos(arg))
-        phi = float(np.pi - theta_beta)
+        phi = float(np.pi - theta_beta)  # <= 이게 beta(0~pi)
 
-        theta_alpha = float(np.arctan2(arm2 * np.sin(phi), arm1 + arm2 * np.cos(phi)))
-        theta = float(theta_gamma - theta_alpha)
+        theta_alpha = float(np.arctan2(
+            arm2 * np.sin(phi),
+            arm1 + arm2 * np.cos(phi)
+        ))
+        theta = float(gamma - theta_alpha)
 
-        if theta < 0.0:
-            theta = float(2.0 * np.pi + theta)
+    # ---- theta를 항상 [0, 2pi)로 정규화 ----
+    theta = float(theta % (2.0 * np.pi))
+
+    # ---- phi는 elbow-down이라서 항상 [0,pi] 유지 ----
+    # (수치 오차로 아주 미세하게 -가 나올 가능성만 방지)
+    phi = float(np.clip(phi, 0.0, np.pi))
 
     return theta, phi
 
