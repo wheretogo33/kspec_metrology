@@ -22,7 +22,7 @@ def findpeak(npeaks
     #---Stack "nframe" Image----------------------------------------------------------------------------------------------------------
     im = np.zeros((8842, 11760))
     for iframe in range(nexposure):
-        im += fits.getdata(data_dir + f'test{iframe}.fits').astype(np.float64)[::-1,:] / nexposure
+        im += fits.getdata(data_dir + f'{head}{iframe}.fits').astype(np.float64)[::-1,:] / nexposure
 
 
     #---Find Peaks Using any method---------------------------------------------------------------------------------------------------    
