@@ -6,6 +6,7 @@ from kspec_metrology.logging.log import get_logger
 
 def findpeak(npeaks
             , data_dir='./MTL/data/'
+            , head='test'
             , nexposure=1
             , threshold=5e3
             , boxsize=40
