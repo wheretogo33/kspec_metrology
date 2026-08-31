@@ -3,6 +3,9 @@ name = "kspec-metrology"
 version = "0.3.0"
 description = "KSPEC focal plane metrology: QHY camera exposure, peak finding, fiber matching, distortion fitting"
 authors = ["Dongkok Kim"]
+packages = [
+	{include = "kspec_metrology"},
+]
 include = [
 	{path = "kspec_metrology/lib/*", format="wheel"},
 	{path = "kspec_metrology/analysis/*.txt"},
