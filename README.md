@@ -1,4 +1,4 @@
-# kspec-metrology
+# kspec_metrology
 
 KSPEC 초점면 metrology. QHY 카메라로 촬영해 fiber 위치를 재고, positioner를
 목표 위치로 옮기기 위한 보정 각도를 계산한다.

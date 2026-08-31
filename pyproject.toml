@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "kspec-metrology"
+name = "kspec_metrology"
 version = "0.3.0"
 description = "KSPEC focal plane metrology: QHY camera exposure, peak finding, fiber matching, distortion fitting"
 authors = ["Dongkok Kim"]
