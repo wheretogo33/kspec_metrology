@@ -1,9 +1,20 @@
 """mock 데이터로 metrology 분석을 한 번 돌려 보는 예제.
 
-하는 일은 mtlcal 한 번 호출하는 것뿐이다. 카메라 없이 미리 만들어 둔 이미지와
-target 파일만 가지고 "이미지 -> peak 검출 -> fiber 매칭 -> 왜곡 보정 ->
-positioner 보정각 json"이 끝까지 도는지 확인하는 용도다. 나머지는 파일 경로를
-받아 넘기고 결과를 보기 좋게 찍는 것뿐이다.
+카메라 없이 미리 만들어 둔 이미지와 target 파일만 가지고 "이미지 -> peak 검출
+-> fiber 매칭 -> 왜곡 보정 -> positioner 보정각 json"이 끝까지 도는지 확인한다.
+
+이 패키지를 붙여 쓰는 방법은 두 층이 있고, --via 로 둘 다 돌려볼 수 있다.
+어느 쪽이든 나오는 각도 json은 완전히 같다.
+
+    --via mtlcal (기본)
+        mtlcal()을 직접 한 번 부른다. 이미지 한 벌을 분석하는 최소 단위라
+        무엇이 입력이고 무엇이 출력인지 보기 쉽다.
+
+    --via metrologyrun
+        MetrologyRun을 촬영 없이(trial(expose=False)) 돌린다. 실제 운용에서
+        쓰는 진입점이 이쪽이므로, 패키지를 이식할 때는 이 형태를 그대로 두고
+        expose=True 로만 바꾸면 된다. trial 번호 관리, 누적 각도 json, 수렴
+        판정이 다 여기 들어 있다.
 
 필요한 파일은 두 개다.
 
@@ -25,10 +36,9 @@ positioner 보정각 json"이 끝까지 도는지 확인하는 용도다. 나머
     # 둘 다 tmp/ 에 있는 경우
     python -m kspec_metrology.run_mock
 
-Trial 0 (관측 전 목표 각도) json은 만들지 않는다. 실제 운용에서는
-MetrologyRun.start() 가 관측 전에 그것부터 저장하지만, 여기서는 이미 찍혀 있는
-이미지를 분석만 하므로 필요 없다. 직전 trial json이 없다고 경고가 한 줄 나오는
-것은 정상이고, mtlcal이 목표 각도를 그 자리에서 계산해 쓴다.
+--via mtlcal 에서는 Trial 0 (관측 전 목표 각도) json을 만들지 않는다. 직전
+trial json이 없다고 경고가 한 줄 나오는 것은 정상이고, mtlcal이 목표 각도를 그
+자리에서 계산해 쓴다. --via metrologyrun 은 start()가 Trial 0부터 저장한다.
 """
 
 import argparse
@@ -71,6 +81,9 @@ def main(argv=None):
     ap.add_argument('--nwindow', type=int, default=40,
                     help='center of mass crop 반폭 [pixel]. fiber 최소 이격 '
                          '3mm 기준이 40이다')
+    ap.add_argument('--via', default='mtlcal',
+                    choices=['mtlcal', 'metrologyrun'],
+                    help='mtlcal을 직접 부를지, MetrologyRun을 촬영 없이 돌릴지')
     args = ap.parse_args(argv)
 
     #---경로: --data-dir가 기본값이고 각각 따로 덮어쓸 수 있다------------------
@@ -93,6 +106,7 @@ def main(argv=None):
               "    파일 이름은 바꾸지 말아야 합니다.", file=sys.stderr)
         return 1
 
+    print(f"via    : {args.via}")
     print(f"target : {target_file}")
     for p in images:
         print(f"image  : {p}")
@@ -102,18 +116,43 @@ def main(argv=None):
 
     os.makedirs(out_dir, exist_ok=True)
 
-    dx, dy, angle_rot, angle_cum = mtlcal(
-        data_dir=image_dir,
-        head=naming.image_head(args.tile, args.itrial),
-        mode=args.mode,
-        threshold=args.threshold,
-        nwindow=args.nwindow,
-        nexposure=args.nexposure,
-        target_file=target_file,
-        json_dir=out_dir,
-        target_name=args.tile,
-        itrial=args.itrial,
-    )
+    if args.via == 'mtlcal':
+        # 이미지 한 벌을 분석하는 최소 단위
+        dx, dy, angle_rot, angle_cum = mtlcal(
+            data_dir=image_dir,
+            head=naming.image_head(args.tile, args.itrial),
+            mode=args.mode,
+            threshold=args.threshold,
+            nwindow=args.nwindow,
+            nexposure=args.nexposure,
+            target_file=target_file,
+            json_dir=out_dir,
+            target_name=args.tile,
+            itrial=args.itrial,
+        )
+    else:
+        # 실제 운용 진입점. 촬영만 건너뛴다 (expose=True로 바꾸면 그대로 관측용)
+        from kspec_metrology.mtlrun import MetrologyRun
+
+        run = MetrologyRun(target_file=target_file,
+                           data_dir=image_dir,
+                           json_dir=out_dir,
+                           mode=args.mode,
+                           threshold=args.threshold,
+                           nwindow=args.nwindow,
+                           nexposure=args.nexposure,
+                           tile=args.tile,
+                           max_trial=args.itrial)
+        run.start()                                 # Trial 0 = 목표 각도
+        for _ in range(args.itrial):
+            res = run.trial(expose=False)
+        dx, dy, angle_rot = res.dx, res.dy, None
+        # mock은 positioner를 실제로 움직일 수 없으니 수렴하지 않는 것이 정상이다.
+        # 실제 운용에서는 trial 사이에 이 json으로 fiber를 옮긴 뒤 다시 찍는다.
+        print(f"\n수렴 여부 : {res.converged} "
+              f"(tolerance {run.tolerance:.1f} um, metric {run.metric})")
+        print("            mock은 fiber를 실제로 못 움직이므로 False가 정상입니다.")
+        print("            실제로는 이 json으로 positioner를 옮긴 뒤 trial을 반복합니다.")
 
     #---결과-------------------------------------------------------------------
     # mtlcal이 이미 fiber 위치 오차를 로그로 찍는다. 여기서는 json만 확인한다.
@@ -126,8 +165,9 @@ def main(argv=None):
     for k in list(data)[:4]:
         print(f"          {k:>8s} : {data[k]:12.4f} deg")
     print("               ...")
-    print(f"회전량 : median {np.median(np.abs(angle_rot)):.4f} deg, "
-          f"max {np.abs(angle_rot).max():.4f} deg")
+    if angle_rot is not None:
+        print(f"회전량 : median {np.median(np.abs(angle_rot)):.4f} deg, "
+              f"max {np.abs(angle_rot).max():.4f} deg")
 
     return 0
 

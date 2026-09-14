@@ -165,9 +165,42 @@ nwindow  <  최소이격[mm] / (2 x 3.76e-3 [mm/px] x |배율|)
 python -m kspec_metrology.run_mock --image-dir /이미지를/받은/폴더
 ```
 
-하는 일은 `mtlcal` 한 번 호출하는 것뿐이다. mock 이미지(`.fits`)는 416 MB라
-저장소에 넣지 않고 따로 공유하고, `object.info`는 저장소에 함께 있다.
-자세한 것은 `kspec_metrology/tmp/README.md` 참고.
+붙여 쓰는 방법은 두 층이고 `--via` 로 둘 다 돌려볼 수 있다. 나오는 각도 json은
+완전히 같다.
+
+**`--via mtlcal` (기본)** — 이미지 한 벌을 분석하는 최소 단위.
+
+```python
+from kspec_metrology.analysis.mtlcal import mtlcal
+from kspec_metrology import naming
+
+dx, dy, angle_rot, angle_cum = mtlcal(
+    data_dir='/fits가_있는_폴더/',
+    head=naming.image_head('test', 1),      # test_MetrologyTrial_1_
+    target_file='/경로/object.info',
+    json_dir='./out', target_name='test', itrial=1)
+```
+
+**`--via metrologyrun`** — 실제 운용 진입점. 이식할 때는 이 형태를 그대로 두고
+`expose=True` 로만 바꾸면 된다 (그때부터 카메라로 직접 찍는다).
+
+```python
+from kspec_metrology.mtlrun import MetrologyRun
+
+run = MetrologyRun(target_file='/경로/object.info',   # 폴더가 아니라 파일 경로
+                   data_dir='/fits가_있는_폴더/',
+                   json_dir='./out')
+run.start()                        # Trial 0 = 관측 전 목표 각도
+res = run.trial(expose=False)      # 촬영 생략. 운용에서는 expose=True
+res.err_max, res.err_median        # fiber 위치 오차 [um]
+```
+
+`tile`은 `object.info`의 `tile_id`에서 자동으로 읽고, `mode`/`nwindow` 등은
+기본값이 mock에 맞게 되어 있어 따로 줄 필요가 없다.
+
+mock 이미지(`.fits`)는 416 MB라 저장소에 넣지 않고 따로 공유하고,
+`object.info`는 저장소에 함께 있다. 자세한 것은
+`kspec_metrology/tmp/README.md` 참고.
 
 ## 구조
 

@@ -27,6 +27,16 @@ python -m kspec_metrology.run_mock
 `--target` 으로 `object.info` 경로를 파일째 지정할 수도 있고, `--out-dir` 로
 결과를 다른 곳에 쓸 수도 있다. 전체 옵션은 `--help` 참고.
 
+실제 운용 진입점인 `MetrologyRun` 으로도 (촬영만 건너뛰고) 같은 것을 돌릴 수
+있다. 결과 json은 완전히 같다.
+
+```bash
+python -m kspec_metrology.run_mock --via metrologyrun --image-dir /받은/폴더
+```
+
+패키지를 이식할 때는 이쪽을 참고하면 된다 — 저장소 최상위 `README.md`의
+"mock 데이터로 돌려보기" 절에 두 방법의 코드가 나란히 있다.
+
 ## 나오는 것
 
 각도 json 두 개가 생긴다 (기본 위치는 `object.info`가 있는 폴더).

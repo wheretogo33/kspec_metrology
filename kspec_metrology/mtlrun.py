@@ -84,7 +84,12 @@ class MetrologyRun:
         metric      : 수렴을 판정할 통계. 'max' (기본) 또는 'median'
         max_trial   : 최대 반복 횟수. None이면 제한 없음
         nexposure   : trial 한 번에 찍을 이미지 장수
-        mode        : findpeak의 peak 검출 방식. 'Predict' 또는 'Raw'
+        mode        : findpeak의 peak 검출 방식. 'Raw' 또는 'Predict'.
+                      'Predict'는 목표 위치를 focal2camera_coeff_comm으로
+                      투영해 출발하므로 그 계수가 실제 광학계와 맞아야 한다.
+                      맞지 않으면 엉뚱한 픽셀에서 무게중심을 재면서도 에러
+                      없이 그럴듯한 값을 내놓는다. 기본값은 그 가정이 필요
+                      없는 'Raw'로 둔다 (mtlcal과 동일)
         threshold   : 'Raw' mode의 검출 문턱값
         nwindow     : center of mass를 잴 crop 반폭 [pixel]. fiber 사이 최소
                       이격 거리에 맞춰야 한다 (mtlcal 참고)
@@ -100,7 +105,7 @@ class MetrologyRun:
                  , metric='max'
                  , max_trial=5
                  , nexposure=1
-                 , mode='Predict'
+                 , mode='Raw'
                  , threshold=3e3
                  , nwindow=40
                  , exptime=0.1
