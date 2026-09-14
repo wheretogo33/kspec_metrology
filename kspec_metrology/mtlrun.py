@@ -86,6 +86,8 @@ class MetrologyRun:
         nexposure   : trial 한 번에 찍을 이미지 장수
         mode        : findpeak의 peak 검출 방식. 'Predict' 또는 'Raw'
         threshold   : 'Raw' mode의 검출 문턱값
+        nwindow     : center of mass를 잴 crop 반폭 [pixel]. fiber 사이 최소
+                      이격 거리에 맞춰야 한다 (mtlcal 참고)
         exptime, gain, offset, readmode, usb_traffic : 카메라 설정
         tile        : 파일 이름에 쓸 타일 이름. None이면 target 파일에서 읽는다
     """
@@ -100,6 +102,7 @@ class MetrologyRun:
                  , nexposure=1
                  , mode='Predict'
                  , threshold=3e3
+                 , nwindow=40
                  , exptime=0.1
                  , gain=10
                  , offset=30
@@ -128,6 +131,7 @@ class MetrologyRun:
         self.nexposure = nexposure
         self.mode = mode
         self.threshold = threshold
+        self.nwindow = nwindow
 
         self.camera = dict(exptime=exptime, gain=gain, offset=offset,
                            readmode=readmode, usb_traffic=usb_traffic)
@@ -190,6 +194,7 @@ class MetrologyRun:
                       , head=self.image_head(itrial)
                       , mode=self.mode
                       , threshold=self.threshold
+                      , nwindow=self.nwindow
                       , nexposure=self.nexposure
                       , target_file=self.target_file
                       , json_dir=self.json_dir
