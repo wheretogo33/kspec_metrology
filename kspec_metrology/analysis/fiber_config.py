@@ -1,20 +1,26 @@
 """사용하는 fiber / fiducial 목록과 positioner arm 길이 정의.
 
-fiber 구성이 바뀌면 이 파일의 FIBERS 표만 고치면 된다. fiber 개수와 arm 길이가
-모두 이 표에서 나오므로 다른 코드는 손댈 필요가 없다.
+fiber 구성이 바뀌면 이 파일만 고치면 된다. fiber 개수와 arm 길이가 모두 여기서
+나오므로 다른 코드는 손댈 필요가 없다.
+
+지금은 Fiber_Configuration 표의 FiducialFlag == 0 인 홀을 "표에 적힌 순서대로"
+모두 positioner로 쓴다 (load_fibers 참고). 표의 순서가 곧
+
+    - object.info의 xp, yp 순서
+    - mtlcal.angle_dict가 만드는 출력 json의 key 순서
+
+라서, 표를 건드리면 target 파일도 같은 순서로 다시 만들어야 한다.
 
 FIBERS의 각 행:
     ID      Fiber_Configuration 표의 fiber ID (= Hole ID)
     arm1    positioner 안쪽 arm 길이 (mm)
     arm2    positioner 바깥쪽 arm 길이 (mm)
-
-행의 "순서"는 target 파일(object.info, tile assign 파일)의 fiber 순서와 같아야
-하고, 계산과 출력 모두 이 순서를 그대로 쓴다.
 """
 
 from pathlib import Path
 
 import numpy as np
+from astropy.io import ascii
 
 # fiber/fiducial의 설계 좌표가 들어 있는 표
 FIBER_TABLE_PATH = str(Path(__file__).with_name('Fiber_Configuration_250415.txt'))
@@ -22,54 +28,48 @@ FIBER_TABLE_PATH = str(Path(__file__).with_name('Fiber_Configuration_250415.txt'
 # 관측할 타일/타겟 정보 (fiber별 목표 위치 xp, yp)
 TARGET_INFO_PATH = '/home/kspecmtl/work/KSPEC_ICS/MTL/target/object.info'
 
-FIBERS = (
-    # ID     arm1    arm2
-    ("B5",   5.13,  11.35),
-    ("C2",   5.29,  11.36),
-    ("D0",   5.21,  11.31),
-    ("E5",   5.23,  11.39),
-    ("E8",   5.23,  11.31),
-    ("G4",   5.28,  11.34),
-    ("G11",  5.21,  11.49),
-    ("H7",   5.23,  11.43),
-    ("I2",   5.29,  11.34),
-    ("I9",   5.20,  11.32),
-    ("K3",   5.28,  11.44),
-    ("K6",   5.04,  11.18),
-    ("L10",  4.98,  11.42),
-    ("M7",   4.98,  11.49),
-)
+# arm 길이 측정값이 없는 positioner에 쓰는 설계값 (arm1, arm2) [mm]
+DEFAULT_ARM = (5.2, 11.6)
 
-# ---------------------------------------------------------------------------
-# fiber 수가 늘어나면 위 표를 직접 적는 대신 텍스트 파일에서 읽어올 수 있다.
-# 아래 형식의 파일(주석은 #, 공백 구분)을 두고 load_fibers()로 바꿔치기하면
-# 나머지 코드는 그대로 동작한다.
+# 측정된 arm 길이가 있는 positioner만 여기에 적는다. 나머지는 DEFAULT_ARM을 쓴다.
 #
-#   # ID   arm1   arm2
-#   B5     5.13   11.35
-#   C2     5.29   11.36
-#   ...
+# 2025-08 시점에 14개 fiber만 측정값이 있었고, 그 값은 아래와 같았다. 지금은 전체
+# positioner를 쓰는데 나머지 측정값이 없어서 전부 설계값으로 통일한다. 측정이
+# 끝나면 아래 주석을 되살려 넣으면 된다.
 #
-# FIBER_LIST_PATH = str(Path(__file__).with_name('fiber_list.txt'))
-#
-# def load_fibers(path=None):
-#     """텍스트 파일에서 FIBERS와 같은 형식의 tuple을 읽어온다."""
-#     rows = []
-#     with open(path or FIBER_LIST_PATH) as ff:
-#         for line in ff:
-#             line = line.split('#')[0].strip()
-#             if not line:
-#                 continue
-#             fid, arm1, arm2 = line.split()
-#             rows.append((fid, float(arm1), float(arm2)))
-#     return tuple(rows)
-#
-# FIBERS = load_fibers()
-# ---------------------------------------------------------------------------
+#   B5  5.13 11.35 | C2  5.29 11.36 | D0  5.21 11.31 | E5  5.23 11.39
+#   E8  5.23 11.31 | G4  5.28 11.34 | G11 5.21 11.49 | H7  5.23 11.43
+#   I2  5.29 11.34 | I9  5.20 11.32 | K3  5.28 11.44 | K6  5.04 11.18
+#   L10 4.98 11.42 | M7  4.98 11.49
+ARM_OVERRIDES = {}
+
+
+def load_fibers(path=None, arm_overrides=None):
+    """Fiber_Configuration 표에서 positioner 행을 읽어 FIBERS 형식으로 돌려준다.
+
+    FiducialFlag == 0 인 행이 positioner다. 표에 적힌 순서를 그대로 지킨다.
+    """
+    tab = ascii.read(path or FIBER_TABLE_PATH)
+    tab.rename_columns(tab.colnames[:4], ["ID", "X", "Y", "FiducialFlag"])
+
+    overrides = ARM_OVERRIDES if arm_overrides is None else arm_overrides
+
+    rows = []
+    for row in tab:
+        if int(row["FiducialFlag"]) != 0:
+            continue
+        hole = str(row["ID"])
+        arm1, arm2 = overrides.get(hole, DEFAULT_ARM)
+        rows.append((hole, float(arm1), float(arm2)))
+
+    return tuple(rows)
+
+
+FIBERS = load_fibers()
 
 # Fiducial은 Fiber_Configuration 표의 FiducialFlag == 1 에서 가져오되,
-# 아래 ID는 사용하지 않는다.
-FIDUCIAL_EXCLUDE = ('A0', 'Z1', 'Z4', 'Z10')
+# 아래 ID는 사용하지 않는다. 지금은 전부 쓴다.
+FIDUCIAL_EXCLUDE = ()
 
 # find_angle_double_method2_select_elbow에 넘기는 자세 정의
 ELBOW = "down"
@@ -88,4 +88,3 @@ def arm_lengths():
     """FIBERS 순서 그대로의 (arm1, arm2) 배열."""
     return (np.array([row[1] for row in FIBERS], dtype=float),
             np.array([row[2] for row in FIBERS], dtype=float))
-
