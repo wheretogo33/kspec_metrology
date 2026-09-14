@@ -211,7 +211,6 @@ def mtlcal(data_dir='./MTL/data/'
 
     xfocal, yfocal, dx, dy, _ = fitdistortion(x, y, fid_flag
                                               , xobs, yobs
-                                              , xorigin, yorigin
                                               , imatch, theta_guess
                                               , xoff_guess, yoff_guess)
 
