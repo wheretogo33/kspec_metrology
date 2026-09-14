@@ -165,9 +165,9 @@ nwindow  <  최소이격[mm] / (2 x 3.76e-3 [mm/px] x |배율|)
 python -m kspec_metrology.run_mock --image-dir /이미지를/받은/폴더
 ```
 
-mock 이미지(`.fits`)는 416 MB라 저장소에 넣지 않고 따로 공유한다. `object.info`
-와 정답 파일은 저장소에 함께 있다. 자세한 것은 `kspec_metrology/tmp/README.md`
-참고.
+하는 일은 `mtlcal` 한 번 호출하는 것뿐이다. mock 이미지(`.fits`)는 416 MB라
+저장소에 넣지 않고 따로 공유하고, `object.info`는 저장소에 함께 있다.
+자세한 것은 `kspec_metrology/tmp/README.md` 참고.
 
 ## 구조
 

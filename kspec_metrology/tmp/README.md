@@ -6,7 +6,6 @@ K-SPEC 초점면을 그대로 본뜬 것으로, positioner 151개와 fiducial 30
 | 파일 | 크기 | 저장소 | 설명 |
 |---|---|---|---|
 | `object.info` | 6 KB | 포함 | fiber 목표 위치 (`xp`, `yp`) 151개. `tile_id="test"`, `zenith_angle=0` |
-| `test_MetrologyTrial_1_truth.npz` | 20 KB | 포함 | 정답. 검증용이라 분석에는 없어도 된다 |
 | `test_MetrologyTrial_1_0.fits` | 416 MB | **제외** | mock metrology 이미지 (8842 x 11760, int32). 용량 때문에 따로 공유한다 |
 
 fits는 `.gitignore`로 빠져 있으니 따로 받아서 아무 폴더에나 두면 된다.
@@ -48,8 +47,17 @@ peak 검출        181 / 181
 fiber 위치 오차  median 약 53 um, max 약 122 um
 ```
 
-가 나온다. 정답 파일이 함께 있으면 `run_mock`이 보정각을 순기구학으로 되풀어
-목표 위치를 재현하는지까지 확인해 준다 (오차 1e-11 um 수준이면 정상).
+가 나온다. 위치 오차 median이 53um 근처면 정상이다 (주입한 sigma 40um의
+Rayleigh median이 47um이고, 표본 151개의 산포가 더해진 값).
+
+`object.info`의 `xp`, `yp`는 **목표(명령) 위치**이고, mtlcal이 보고하는
+`dx`, `dy`는 "측정한 위치 - 목표"다. 분석에 필요한 참값은 이것이 전부다.
+
+빛이 실제로 맺힌 자리(목표 + 위치오차 + 전역 offset)는 `object.info`에 없다.
+그 값으로 결과를 대조해 보고 싶으면 생성기가 함께 만드는
+`{tile}_MetrologyTrial_{itrial}_truth.npz` 를 보면 된다 (`xcalc`, `ycalc`가 실제
+위치, `x`, `y`가 목표, `xoff`, `yoff`가 전역 offset). 분석에는 쓰이지 않으므로
+저장소에는 넣지 않는다.
 
 ## mock을 다시 만들려면
 

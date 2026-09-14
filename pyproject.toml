@@ -16,16 +16,16 @@ include = [
 	# 넣을 것만 하나씩 적는다.
 	{path = "kspec_metrology/tmp/README.md"},
 	{path = "kspec_metrology/tmp/object.info"},
-	{path = "kspec_metrology/tmp/*.npz"},
 ]
 exclude = [
 	"kspec_metrology/.claude/**",
 	"**/__pycache__/**",
 	# mock 이미지는 416MB라 배포 패키지에 넣지 않는다 (넣으면 pip install이
 	# 그만큼 무거워진다). 저장소에서도 .gitignore로 빠져 있고, 따로 공유한다.
-	# run_mock이 만드는 결과 json도 산출물이라 뺀다.
-	# tmp/의 나머지(object.info, truth, README)는 위 include로 같이 들어간다.
+	# truth npz(분석에 안 쓰임)와 run_mock이 만드는 결과 json도 뺀다.
+	# tmp/의 나머지(object.info, README)는 위 include로 같이 들어간다.
 	"kspec_metrology/tmp/*.fits",
+	"kspec_metrology/tmp/*.npz",
 	"kspec_metrology/tmp/*.json",
 ]
 
