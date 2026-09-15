@@ -48,6 +48,9 @@ def load_configuration(target_file=None, apply_zenith_offset=True):
                if i not in cfg.FIDUCIAL_EXCLUDE]
     pick_ids = list(dict.fromkeys(list(ids) + list(fid_ids)))
 
+    log.info("Fiber table %s: %d positioners + %d fiducials",
+             cfg.FIBER_TABLE_PATH, nfib, len(fid_ids))
+
     xy_map = {r["ID"]: (r["X"], r["Y"]) for r in tab}
     xy = np.array([xy_map[i] for i in pick_ids], dtype=float)
     xorigin, yorigin = xy[:, 0], xy[:, 1]

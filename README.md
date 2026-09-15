@@ -112,9 +112,42 @@ fiber 구성은 `analysis/fiber_config.py` 에서 정한다. fiber 개수와 arm
 
 즉 fiber를 넣고 빼려면 표의 `FiducialFlag` 를 고치면 되고, `fiber_config.py`
 는 건드릴 필요가 없다. 현재 구성은 positioner 151개 + fiducial 30개다.
+positioner를 꽂지 않은 홀은 행을 지우지 말고 `-9` 로 두는 편이 낫다. 전체 홀
+지도가 남아 어느 자리가 비었는지 보이고, `-9` 행은 positioner 목록
+(`fiber_config.load_fibers`)과 fiducial 목록(`mtlcal.load_configuration`)
+양쪽에서 걸러진다.
 
 **표의 순서가 곧 `object.info` 의 `xp`, `yp` 순서**이고 출력 json의 key 순서도
-같다. 표를 건드리면 target 파일도 같은 순서로 다시 만들어야 한다.
+같다. 표를 건드리면 target 파일도 같은 순서로 다시 만들어야 한다. `xp` 가
+모자라면 바로 예외가 나지만, **남으면 앞에서 잘라 쓰면서 조용히 지나간다** —
+positioner를 줄였는데 예전 target 파일을 그대로 쓰면 엉뚱한 fiber에 엉뚱한
+목표가 붙는다.
+
+### 설정이 여러 개일 때
+
+표의 기본 위치는 패키지 안(`analysis/Fiber_Configuration_250415.txt`)이다.
+설정을 바꿔 가며 쓸 거면 표를 패키지 밖에 이름 붙여 따로 두고
+`KSPEC_FIBER_TABLE` 로 고르는 편이 낫다.
+
+```bash
+KSPEC_FIBER_TABLE=~/configs/Fiber_Configuration_phase1.txt \
+    python -m kspec_metrology.run_mock --image-dir /받은/폴더
+```
+
+패키지 안의 파일을 덮어쓰면 `pip install` 때 날아가고, 지금 어느 설정으로 돌고
+있는지도 보이지 않는다. 지정한 파일이 없으면 import 시점에 바로 예외가 난다.
+
+어느 표가 실제로 쓰였는지는 `mtlcal` 이 로그에 남긴다.
+
+```
+INFO Fiber table /경로/Fiber_Configuration_phase1.txt: 51 positioners + 30 fiducials
+```
+
+> mock 생성기(`image_simulation`)와 분석이 **같은 표**를 봐야 한다. 둘이 다른
+> 표를 보면 spot 개수가 어긋나 fiber 매칭이 깨진다. 패키지가 pip으로 설치돼
+> 있으면 `sys.path` 순서에 따라 설치본 표가 먼저 잡힐 수 있으니,
+> `cfg.FIBER_TABLE_PATH` 를 찍어 확인하거나 `KSPEC_FIBER_TABLE` 로 양쪽을
+> 못박아 두는 것이 안전하다.
 
 ### arm 길이
 

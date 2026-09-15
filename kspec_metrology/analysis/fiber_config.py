@@ -4,7 +4,12 @@ fiber 구성이 바뀌면 이 파일만 고치면 된다. fiber 개수와 arm �
 나오므로 다른 코드는 손댈 필요가 없다.
 
 지금은 Fiber_Configuration 표의 FiducialFlag == 0 인 홀을 "표에 적힌 순서대로"
-모두 positioner로 쓴다 (load_fibers 참고). 표의 순서가 곧
+모두 positioner로 쓴다 (load_fibers 참고). 어느 홀에 positioner를 꽂았는지가
+바뀌면 코드가 아니라 표의 FiducialFlag를 고치면 된다 (0 = positioner,
+1 = fiducial, -9 = 미장착). 설정별로 표를 여러 개 두고 쓰려면
+KSPEC_FIBER_TABLE 환경변수를 보라.
+
+표의 순서가 곧
 
     - object.info의 xp, yp 순서
     - mtlcal.angle_dict가 만드는 출력 json의 key 순서
@@ -17,13 +22,34 @@ FIBERS의 각 행:
     arm2    positioner 바깥쪽 arm 길이 (mm)
 """
 
+import os
 from pathlib import Path
 
 import numpy as np
 from astropy.io import ascii
 
-# fiber/fiducial의 설계 좌표가 들어 있는 표
-FIBER_TABLE_PATH = str(Path(__file__).with_name('Fiber_Configuration_250415.txt'))
+# fiber/fiducial의 설계 좌표가 들어 있는 표.
+#
+# 기본값은 패키지 안에 같이 들어 있는 파일이다. 설정(어느 홀에 positioner를
+# 꽂았는지)이 여럿이면 표를 패키지 밖에 이름 붙여 따로 두고 KSPEC_FIBER_TABLE
+# 환경변수로 고르는 편이 낫다. 패키지 안의 파일을 덮어쓰면 pip install 때
+# 날아가고, 지금 어느 설정으로 돌고 있는지도 안 보인다.
+#
+#   KSPEC_FIBER_TABLE=~/configs/Fiber_Configuration_phase1.txt python ...
+#
+# 표를 바꾸면 positioner 개수와 순서가 바뀌므로 target 파일(object.info)의
+# xp, yp도 같은 순서로 다시 만들어야 한다. xp가 더 많으면 앞에서 잘라 쓰면서
+# 조용히 지나가므로(mtlcal.load_configuration) 특히 주의할 것.
+FIBER_TABLE_ENV = 'KSPEC_FIBER_TABLE'
+DEFAULT_FIBER_TABLE_PATH = str(Path(__file__).with_name('Fiber_Configuration_250415.txt'))
+
+FIBER_TABLE_PATH = os.environ.get(FIBER_TABLE_ENV) or DEFAULT_FIBER_TABLE_PATH
+
+if not os.path.exists(FIBER_TABLE_PATH):
+    raise FileNotFoundError(
+        f"Fiber configuration table not found: {FIBER_TABLE_PATH}"
+        + (f" (from ${FIBER_TABLE_ENV})" if os.environ.get(FIBER_TABLE_ENV)
+           else ""))
 
 # 관측할 타일/타겟 정보 (fiber별 목표 위치 xp, yp)
 TARGET_INFO_PATH = '/home/kspecmtl/work/KSPEC_ICS/MTL/target/object.info'
