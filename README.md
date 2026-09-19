@@ -171,6 +171,40 @@ ARM_OVERRIDES = {
 이미지(Zemax 설계 광학계) 기준인 `-8.4675` 로 맞춰져 있으니, 실카메라 배율이
 확정되면 이 상수를 바꿔야 한다.
 
+### peak 검출 방법
+
+`finder` 로 고른다. 어느 것을 쓰든 뒤 단계(중복 제거, center of mass, fiber
+매칭)는 같고, mock 이미지에서 네 방법 모두 **완전히 같은 각도 json**을 냈다.
+full frame(8842 x 11760, spot 181개) 기준 소요 시간은 다음과 같다.
+
+| finder | 시간 | 특징 |
+|---|---|---|
+| `sep` | 1.5 s | 가장 빠르다. 별도 설치 필요 (`pip install "kspec_metrology[sep]"`) |
+| `segmentation` | 2.5 s | 연결 성분. `npixels` 로 잡티를 거른다 |
+| `find_peaks` (기본) | 6.1 s | 국소 최대만 본다. 기존 방법 |
+| `daofind` | 23 s | PSF 모양까지 본다. 붙어 있는 spot에 강하다 |
+
+```python
+mtlcal(..., finder='sep', finder_opts={'minarea': 5})
+```
+
+방법별 인자는 `finder_opts` 로 넘긴다 — `sep`은 `minarea`, `segmentation`은
+`npixels`, `daofind`는 `fwhm`, `find_peaks`는 `boxsize` 인자를 쓴다.
+`threshold` 와 `niter_max` 는 방법과 무관하게 공통이다.
+
+### background 제거
+
+| `background` | 시간 | 하는 일 |
+|---|---|---|
+| `None` (기본) | — | 빼지 않는다 |
+| `'scalar'` | 0.9 s | 전체에서 sigma clipped median 하나를 뺀다 |
+| `'sep'` | 0.6 s | 위치에 따라 변하는 배경을 뺀다 |
+| `'background2d'` | 6 s | 같은 일을 photutils로 |
+| `'crop'` | — | centroid를 잴 때 잘라낸 조각마다 뺀다 (예전 `SigmaClipping=True`) |
+
+배경이 평평하면 `'scalar'` 나 `'crop'` 으로 충분하고, 기울기나 얼룩이 있으면
+`'sep'` / `'background2d'` 를 쓴다. `threshold` 는 배경을 뺀 뒤 기준이다.
+
 ### peak 측정 창
 
 `nwindow` (기본 40) 는 center of mass를 잴 crop 반폭 [pixel] 이다. 이 창 안에

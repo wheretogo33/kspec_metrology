@@ -44,6 +44,14 @@ scipy = ">=1.11"       # photutils>=2 요구 하한
 astropy = ">=5.3"      # photutils>=2 요구 하한
 photutils = ">=1.9"
 
+# peak 검출 방법 중 'sep'을 쓸 때만 필요하다. 없어도 나머지 방법
+# (find_peaks, daofind, segmentation)은 그대로 동작한다.
+#   pip install "kspec_metrology[sep]"
+sep = {version = ">=1.2", optional = true}
+
+[tool.poetry.extras]
+sep = ["sep"]
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

@@ -178,6 +178,10 @@ def mtlcal(data_dir='./MTL/data/'
            , mode='Raw'
            , threshold=3e3
            , nwindow=40
+           , finder='find_peaks'
+           , finder_opts=None
+           , background=None
+           , background_opts=None
            , nexposure=1
            , target_file=None
            , json_dir=None
@@ -193,6 +197,10 @@ def mtlcal(data_dir='./MTL/data/'
     반폭을 focal plane 거리로 환산하면 nwindow * 3.76e-3 mm/px * 배율(~8.47)
     이므로, fiber 사이 최소 이격 거리의 절반보다 작아야 한다.
     최소 이격 3mm 기준이면 nwindow <= 40 이어야 한다.
+
+    finder / finder_opts 는 peak을 찾는 방법과 그 인자다 ('find_peaks',
+    'daofind', 'sep', 'segmentation'). background / background_opts 는 배경
+    제거 방식이다. 둘 다 findpeak으로 그대로 넘어간다 (peakfind 참고).
 
     json_dir와 target_name을 주면 누적 각도를 trial별 json으로 저장한다.
     누적 각도는 직전 trial의 json에 이번 회전량을 더한 값이라, itrial-1 파일이
@@ -215,6 +223,10 @@ def mtlcal(data_dir='./MTL/data/'
                                 , nexposure=nexposure
                                 , threshold=threshold
                                 , nwindow=nwindow
+                                , finder=finder
+                                , finder_opts=finder_opts
+                                , background=background
+                                , background_opts=background_opts
                                 , mode=mode
                                 , x=x, y=y)
 

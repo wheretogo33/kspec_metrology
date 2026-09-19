@@ -1,6 +1,6 @@
 import numpy as np
-from photutils.detection import find_peaks, DAOStarFinder
 from astropy.io import fits
+from kspec_metrology.analysis import peakfind
 from kspec_metrology.analysis.utils import com, dedupe_peaks_kdtree, measure_sigma
 from kspec_metrology.analysis.utils import transform, focal2camera_coeff_comm, nearest_index_sorted
 from kspec_metrology.logging.log import get_logger
@@ -13,17 +13,35 @@ def findpeak(npeaks
             , data_dir='./MTL/data/'
             , head='test'
             , nexposure=1
-            , threshold=5e3
-            , boxsize=100
+            , threshold=1e3
+            , boxsize=40
             , nwindow=100
             , mode="Raw"
             , x=None, y=None
-            , niter_max=50
+            , niter_max=10
             , niter_refine=2
+            , finder='find_peaks'
+            , finder_opts=None
+            , background=None
+            , background_opts=None
             , SigmaClipping=False
             , ReturnFiberImage=False
             , ReturnSpotSize=False):
 
+    """이미지에서 fiber peak을 찾아 중심 위치를 잰다.
+
+    finder : peak을 찾는 방법. 'find_peaks'(기본), 'daofind', 'sep',
+        'segmentation'. 어느 것을 쓰든 뒤 단계는 같다 (peakfind 참고).
+    finder_opts : 방법별 추가 인자 dict. 예) {'minarea': 8} (sep),
+        {'fwhm': 8.0} (daofind), {'npixels': 5} (segmentation).
+        'find_peaks'는 box_size를 boxsize 인자에서 받는다.
+    background : 'scalar' | 'background2d' | 'sep' 이면 peak을 찾기 전에
+        이미지 전체에서 배경을 뺀다. 'crop'이면 빼지 않고 centroid를 잴 때
+        잘라낸 조각마다 뺀다 (예전 SigmaClipping=True와 같다).
+        None이면 아무것도 하지 않는다.
+    background_opts : 배경 추정에 넘길 인자 dict.
+    threshold : 검출 문턱값 [ADU]. background를 뺐으면 뺀 뒤 기준이다.
+    """
     log = get_logger()
 
     xchip = np.linspace(-5879.5, 5879.5, 11760)*3.76e-3
@@ -36,9 +54,22 @@ def findpeak(npeaks
         im += fits.getdata(image_path(data_dir, head, iframe)).astype(np.float64)[::-1,:] / nexposure
 
     ny, nx = im.shape
+
+    #---Background--------------------------------------------------------------
+    # 'crop'은 여기서 빼지 않고 centroid 단계에서 조각마다 뺀다.
+    if SigmaClipping and background is None:
+        background = 'crop'                 # 예전 인자 호환
+    crop_background = (background == 'crop')
+    if background is not None and not crop_background:
+        im, _ = peakfind.subtract_background(im, method=background,
+                                             options=background_opts,
+                                             inplace=True)
     
     #---Find Peaks Using any method---------------------------------------------------------------------------------------------------    
-    log.info("Start finding peaks with %s", mode)
+    log.info("Start finding peaks with %s (finder=%s)", mode, finder)
+    fopts = dict(finder_opts or {})
+    if finder == 'find_peaks':
+        fopts.setdefault('box_size', boxsize)
     if mode == "Raw":
         # 검출 개수가 정확히 npeaks가 되는 문턱값을 찾는다.
         #
@@ -54,7 +85,8 @@ def findpeak(npeaks
         best = None         # (|개수차|, peak_table, 문턱)
 
         for niter in range(1, niter_max+1):
-            peak_table_raw = find_peaks(im, threshold=threshold_temp, box_size=boxsize)
+            peak_table_raw = peakfind.find(im, threshold_temp,
+                                           method=finder, options=fopts)
             peak_table = dedupe_peaks_kdtree(peak_table_raw, min_dist=40)
             nfound = len(peak_table)
             log.info("Iteration %d: threshold %.4g -> %d peaks (target %d)",
@@ -175,7 +207,7 @@ def findpeak(npeaks
 
         # background 제거: sigma clipping으로 구한 median을 빼고 음수는 0으로
         # SW added on 2026-01-31
-        if SigmaClipping:
+        if crop_background:
             _, im_med, _ = sigma_clipped_stats(im_crop, sigma=5.0)
             im_crop = np.clip(im_crop - im_med, a_min=0, a_max=None)
 

@@ -93,6 +93,11 @@ class MetrologyRun:
         threshold   : 'Raw' mode의 검출 문턱값
         nwindow     : center of mass를 잴 crop 반폭 [pixel]. fiber 사이 최소
                       이격 거리에 맞춰야 한다 (mtlcal 참고)
+        finder      : peak 검출 방법. 'find_peaks'(기본), 'daofind', 'sep',
+                      'segmentation' (peakfind 참고)
+        finder_opts : 방법별 추가 인자 dict
+        background  : 배경 제거. 'scalar' | 'background2d' | 'sep' | 'crop'
+        background_opts : 배경 추정 인자 dict
         exptime, gain, offset, readmode, usb_traffic : 카메라 설정
         tile        : 파일 이름에 쓸 타일 이름. None이면 target 파일에서 읽는다
     """
@@ -108,6 +113,10 @@ class MetrologyRun:
                  , mode='Raw'
                  , threshold=3e3
                  , nwindow=40
+                 , finder='find_peaks'
+                 , finder_opts=None
+                 , background=None
+                 , background_opts=None
                  , exptime=0.1
                  , gain=10
                  , offset=30
@@ -137,6 +146,10 @@ class MetrologyRun:
         self.mode = mode
         self.threshold = threshold
         self.nwindow = nwindow
+        self.finder = finder
+        self.finder_opts = finder_opts
+        self.background = background
+        self.background_opts = background_opts
 
         self.camera = dict(exptime=exptime, gain=gain, offset=offset,
                            readmode=readmode, usb_traffic=usb_traffic)
@@ -200,6 +213,10 @@ class MetrologyRun:
                       , mode=self.mode
                       , threshold=self.threshold
                       , nwindow=self.nwindow
+                      , finder=self.finder
+                      , finder_opts=self.finder_opts
+                      , background=self.background
+                      , background_opts=self.background_opts
                       , nexposure=self.nexposure
                       , target_file=self.target_file
                       , json_dir=self.json_dir

@@ -13,6 +13,8 @@
 
 # 패키지 안에서도 제외할 것
 kspec_metrology/.claude/
+kspec_metrology/**/*.ipynb
+kspec_metrology/*.ipynb
 **/__pycache__/
 *.py[cod]
 
