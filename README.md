@@ -217,6 +217,24 @@ nwindow  <  최소이격[mm] / (2 x 3.76e-3 [mm/px] x |배율|)
 최소 이격 3 mm 기준이면 `nwindow <= 40` 이다. `mtlcal()` 과 `MetrologyRun()`
 양쪽에 인자로 열려 있다.
 
+**창을 무게중심으로 옮겨 다시 재기** (`niter_recenter`, 기본 0). PSF가
+비대칭이면 peak 픽셀과 무게중심이 어긋나서, peak을 중심으로 자른 창은 한쪽
+꼬리만 자르고 그만큼 치우친다. 창을 무게중심으로 옮겨 다시 재면 양쪽을 고르게
+잘라 치우침이 사라진다. PSF가 창에 비해 클수록 효과가 크다.
+
+```python
+mtlcal(..., nwindow=40, niter_recenter=2)
+```
+
+창이 이웃 spot 쪽으로 끌려가는 것을 막기 위해 처음 peak에서 `max_shift`
+(기본 `nwindow//2`) 픽셀 넘게 움직이면 그 spot은 peak 중심 결과로 되돌리고
+경고를 남긴다. 실제 이동량은 로그에 찍히므로 그걸 보고 `max_shift`를 정하면
+된다 (정상 spot의 최대 이동량보다 조금 크게).
+
+```
+INFO Recentering shift [px]: median 3.2, 95% 7.1, max 8.5 (limit 20)
+```
+
 ### target 파일 경로
 
 `fiber_config.TARGET_INFO_PATH` 의 기본값은 관측 시스템 경로

@@ -178,6 +178,7 @@ def mtlcal(data_dir='./MTL/data/'
            , mode='Raw'
            , threshold=3e3
            , nwindow=40
+           , niter_recenter=0
            , finder='find_peaks'
            , finder_opts=None
            , background=None
@@ -197,6 +198,9 @@ def mtlcal(data_dir='./MTL/data/'
     반폭을 focal plane 거리로 환산하면 nwindow * 3.76e-3 mm/px * 배율(~8.47)
     이므로, fiber 사이 최소 이격 거리의 절반보다 작아야 한다.
     최소 이격 3mm 기준이면 nwindow <= 40 이어야 한다.
+
+    niter_recenter 는 창을 무게중심으로 옮겨 다시 재는 횟수다 (findpeak 참고).
+    PSF가 창에 비해 크면 켜는 것이 좋다.
 
     finder / finder_opts 는 peak을 찾는 방법과 그 인자다 ('find_peaks',
     'daofind', 'sep', 'segmentation'). background / background_opts 는 배경
@@ -223,6 +227,7 @@ def mtlcal(data_dir='./MTL/data/'
                                 , nexposure=nexposure
                                 , threshold=threshold
                                 , nwindow=nwindow
+                                , niter_recenter=niter_recenter
                                 , finder=finder
                                 , finder_opts=finder_opts
                                 , background=background

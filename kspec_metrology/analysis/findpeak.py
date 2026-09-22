@@ -20,6 +20,8 @@ def findpeak(npeaks
             , x=None, y=None
             , niter_max=10
             , niter_refine=2
+            , niter_recenter=0
+            , max_shift=None
             , finder='find_peaks'
             , finder_opts=None
             , background=None
@@ -41,6 +43,14 @@ def findpeak(npeaks
         None이면 아무것도 하지 않는다.
     background_opts : 배경 추정에 넘길 인자 dict.
     threshold : 검출 문턱값 [ADU]. background를 뺐으면 뺀 뒤 기준이다.
+    niter_recenter : center of mass를 잰 뒤 창을 그 무게중심으로 옮겨 다시
+        재는 횟수. 0이면 peak 픽셀을 중심으로 한 번만 잰다 (예전 동작).
+        PSF가 비대칭이면 peak과 무게중심이 어긋나 창이 한쪽 꼬리만 자르게
+        되는데, 창을 무게중심에 맞추면 양쪽을 고르게 잘라 치우침이 사라진다.
+        PSF가 창에 비해 클수록 효과가 크다.
+    max_shift : 재중심 때 창이 처음 peak에서 벗어날 수 있는 최대 거리
+        [pixel]. 넘으면 이웃 spot에 끌려가는 것으로 보고 처음 결과를 쓴다.
+        None이면 nwindow//2.
     """
     log = get_logger()
 
@@ -182,12 +192,25 @@ def findpeak(npeaks
     else:
         icen, jcen = np.asarray(xf, dtype=int), np.asarray(yf, dtype=int)
 
-    def crop(ifiber, half):
-        """(jcen, icen) 픽셀을 중심으로 2*half 크기의 이미지와 좌표축을 잘라낸다."""
-        i0, j0 = icen[ifiber], jcen[ifiber]
+    def crop_at(i0, j0, half):
+        """(j0, i0) 픽셀을 중심으로 2*half 크기의 이미지와 좌표축을 잘라낸다."""
         return (im[j0-half:j0+half, i0-half:i0+half],
                 xchip[i0-half:i0+half],
                 ychip[j0-half:j0+half])
+
+    def measure(i0, j0):
+        """창 하나를 잘라 (필요하면 배경을 빼고) 무게중심을 잰다."""
+        im_crop, x_crop, y_crop = crop_at(i0, j0, nwindow)
+        if crop_background:
+            # sigma clipping으로 구한 median을 빼고 음수는 0으로
+            _, im_med, _ = sigma_clipped_stats(im_crop, sigma=5.0)
+            im_crop = np.clip(im_crop - im_med, a_min=0, a_max=None)
+        xc, yc = com(im_crop, x_crop, y_crop)
+        return xc, yc, im_crop, x_crop, y_crop
+
+    shift_limit = nwindow // 2 if max_shift is None else max_shift
+    nrevert = 0
+    shifts = np.zeros(npeaks)       # 재중심으로 창이 peak에서 움직인 거리 [px]
 
     # peak 값은 두 mode 모두 중심 픽셀의 밝기로 정의한다.
     # Raw mode에서는 photutils가 주는 peak_table['peak_value']와 동일하다.
@@ -203,15 +226,27 @@ def findpeak(npeaks
         im_crop_full = np.zeros( (npeaks, nwindow*2, nwindow*2))
 
     for ifiber in range(npeaks):
-        im_crop, x_crop, y_crop = crop(ifiber, nwindow)
+        i0, j0 = int(icen[ifiber]), int(jcen[ifiber])
+        first = measure(i0, j0)
+        xc, yc, im_crop, x_crop, y_crop = first
 
-        # background 제거: sigma clipping으로 구한 median을 빼고 음수는 0으로
-        # SW added on 2026-01-31
-        if crop_background:
-            _, im_med, _ = sigma_clipped_stats(im_crop, sigma=5.0)
-            im_crop = np.clip(im_crop - im_med, a_min=0, a_max=None)
+        # 창을 무게중심으로 옮겨 가며 다시 잰다
+        for _ in range(niter_recenter):
+            inew = int(nearest_index_sorted(xchip, np.atleast_1d(xc))[0])
+            jnew = int(nearest_index_sorted(ychip, np.atleast_1d(yc))[0])
+            if np.hypot(inew-icen[ifiber], jnew-jcen[ifiber]) > shift_limit:
+                # 이웃 spot에 끌려가고 있다. 처음(peak 중심) 결과로 되돌린다.
+                xc, yc, im_crop, x_crop, y_crop = first
+                i0, j0 = int(icen[ifiber]), int(jcen[ifiber])
+                nrevert += 1
+                break
+            if (inew, jnew) == (i0, j0):
+                break                               # 더 움직이지 않는다
+            i0, j0 = inew, jnew
+            xc, yc, im_crop, x_crop, y_crop = measure(i0, j0)
 
-        xobs[ifiber], yobs[ifiber] = com(im_crop, x_crop, y_crop)
+        xobs[ifiber], yobs[ifiber] = xc, yc
+        shifts[ifiber] = np.hypot(i0-icen[ifiber], j0-jcen[ifiber])
 
         # spot size는 background 제거를 거친 im_crop의 중앙 절반 window에서 측정
         if ReturnSpotSize: # SW added on 2026-01-31
@@ -221,6 +256,17 @@ def findpeak(npeaks
 
         if ReturnFiberImage:
             im_crop_full[ifiber] = im_crop
+
+    if niter_recenter:
+        # max_shift를 실제 PSF에 맞게 정하는 근거. 정상 spot의 이동량보다
+        # 조금 크게 (예: 최대값의 1.5배) 잡으면 이웃에 끌려가는 창만 걸러진다.
+        log.info("Recentering shift [px]: median %.1f, 95%% %.1f, max %.1f "
+                 "(limit %d)", np.median(shifts), np.percentile(shifts, 95),
+                 shifts.max(), shift_limit)
+    if niter_recenter and nrevert:
+        log.warning("Recentering pulled %d window(s) more than %d px away "
+                    "from their peak; used the peak-centred result for them",
+                    nrevert, shift_limit)
 
     #---Return------------------------------------------------------------------------------------------------------------------------
     # 기본  : im, xobs, yobs, peak_value
