@@ -227,7 +227,7 @@ mtlcal(..., finder='sep', finder_opts={'minarea': 5})
 | `'scalar'` | 0.9 s | 전체에서 sigma clipped median 하나를 뺀다 |
 | `'sep'` | 0.6 s | 위치에 따라 변하는 배경을 뺀다 |
 | `'background2d'` | 6 s | 같은 일을 photutils로 |
-| `'crop'` | — | centroid를 잴 때 잘라낸 조각마다 뺀다 (예전 `SigmaClipping=True`) |
+| `'crop'` | — | centroid를 잴 때 창마다 뺀다. `background_opts={'sigma': 5.0}` |
 
 배경이 평평하면 `'scalar'` 나 `'crop'` 으로 충분하고, 기울기나 얼룩이 있으면
 `'sep'` / `'background2d'` 를 쓴다. `threshold` 는 배경을 뺀 뒤 기준이다.

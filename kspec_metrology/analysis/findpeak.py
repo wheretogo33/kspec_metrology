@@ -26,22 +26,22 @@ def findpeak(npeaks
             , finder_opts=None
             , background=None
             , background_opts=None
-            , SigmaClipping=False
             , ReturnFiberImage=False
             , ReturnSpotSize=False):
 
     """이미지에서 fiber peak을 찾아 중심 위치를 잰다.
 
-    finder : peak을 찾는 방법. 'find_peaks'(기본), 'daofind', 'sep',
+    finder : peak을 찾는 방법. 'sep'(기본), 'find_peaks', 'daofind',
         'segmentation'. 어느 것을 쓰든 뒤 단계는 같다 (peakfind 참고).
     finder_opts : 방법별 추가 인자 dict. 예) {'minarea': 8} (sep),
         {'fwhm': 8.0} (daofind), {'npixels': 5} (segmentation).
         'find_peaks'는 box_size를 boxsize 인자에서 받는다.
     background : 'scalar' | 'background2d' | 'sep' 이면 peak을 찾기 전에
         이미지 전체에서 배경을 뺀다. 'crop'이면 빼지 않고 centroid를 잴 때
-        잘라낸 조각마다 뺀다 (예전 SigmaClipping=True와 같다).
-        None이면 아무것도 하지 않는다.
-    background_opts : 배경 추정에 넘길 인자 dict.
+        잘라낸 창마다 sigma clipping으로 구한 median을 빼고 음수를 0으로
+        자른다. None이면 아무것도 하지 않는다.
+    background_opts : 배경 추정에 넘길 인자 dict. 'crop'은 sigma만 받는다
+        (기본 5.0).
     threshold : 검출 문턱값 [ADU]. background를 뺐으면 뺀 뒤 기준이다.
     niter_recenter : center of mass를 잰 뒤 창을 그 무게중심으로 옮겨 다시
         재는 횟수. 0이면 peak 픽셀을 중심으로 한 번만 잰다 (예전 동작).
@@ -67,9 +67,8 @@ def findpeak(npeaks
 
     #---Background--------------------------------------------------------------
     # 'crop'은 여기서 빼지 않고 centroid 단계에서 조각마다 뺀다.
-    if SigmaClipping and background is None:
-        background = 'crop'                 # 예전 인자 호환
     crop_background = (background == 'crop')
+    crop_sigma = dict(background_opts or {}).get('sigma', 5.0)
     if background is not None and not crop_background:
         im, _ = peakfind.subtract_background(im, method=background,
                                              options=background_opts,
@@ -203,7 +202,7 @@ def findpeak(npeaks
         im_crop, x_crop, y_crop = crop_at(i0, j0, nwindow)
         if crop_background:
             # sigma clipping으로 구한 median을 빼고 음수는 0으로
-            _, im_med, _ = sigma_clipped_stats(im_crop, sigma=5.0)
+            _, im_med, _ = sigma_clipped_stats(im_crop, sigma=crop_sigma)
             im_crop = np.clip(im_crop - im_med, a_min=0, a_max=None)
         xc, yc = com(im_crop, x_crop, y_crop)
         return xc, yc, im_crop, x_crop, y_crop

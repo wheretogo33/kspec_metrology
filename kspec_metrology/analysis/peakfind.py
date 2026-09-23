@@ -25,7 +25,7 @@ background 제거는 세 가지다.
     'sep'           sep.Background로 같은 일을 더 빠르게        (~0.6 s)
 
 'crop'은 여기가 아니라 findpeak의 centroid 단계에서 잘라낸 조각마다 빼는
-방식이고(기존 SigmaClipping), 전역 배경이 평평할 때는 그쪽이 더 안전하다.
+방식이고, 전역 배경이 평평할 때는 그쪽이 더 안전하다.
 """
 
 import numpy as np
