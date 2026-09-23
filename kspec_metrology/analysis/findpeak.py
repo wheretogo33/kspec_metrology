@@ -15,7 +15,7 @@ def findpeak(npeaks
             , nexposure=1
             , threshold=1e3
             , boxsize=40
-            , nwindow=100
+            , nwindow=40
             , mode="Raw"
             , x=None, y=None
             , niter_max=10
