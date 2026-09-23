@@ -45,13 +45,10 @@ scipy = ">=1.11"       # photutils>=2 요구 하한
 astropy = ">=5.3"      # photutils>=2 요구 하한
 photutils = ">=1.9"
 
-# peak 검출 방법 중 'sep'을 쓸 때만 필요하다. 없어도 나머지 방법
-# (find_peaks, daofind, segmentation)은 그대로 동작한다.
-#   pip install "kspec_metrology[sep]"
-sep = {version = ">=1.2", optional = true}
-
-[tool.poetry.extras]
-sep = ["sep"]
+# 기본 peak 검출 방법이 'sep'이므로 필수다. 다른 방법
+# (find_peaks, daofind, segmentation)만 쓸 거면 없어도 import는 된다
+# (peakfind가 지연 import한다).
+sep = ">=1.2"
 
 [build-system]
 requires = ["poetry-core"]

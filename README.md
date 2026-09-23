@@ -34,6 +34,7 @@ pip install .
 | scipy | 1.11 |
 | astropy | 5.3 |
 | photutils | 1.9 |
+| sep | 1.2 |
 
 상한은 두지 않았다. 쓰는 API가 오래 안정적인 코어뿐이라
 numpy 1↔2, astropy 7↔8, photutils 2↔3 경계에서 모두 동작을 확인했다.
@@ -205,9 +206,9 @@ full frame(8842 x 11760, spot 181개) 기준 소요 시간은 다음과 같다.
 
 | finder | 시간 | 특징 |
 |---|---|---|
-| `sep` | 1.5 s | 가장 빠르다. 별도 설치 필요 (`pip install "kspec_metrology[sep]"`) |
+| `sep` (기본) | 1.5 s | 가장 빠르다 |
 | `segmentation` | 2.5 s | 연결 성분. `npixels` 로 잡티를 거른다 |
-| `find_peaks` (기본) | 6.1 s | 국소 최대만 본다. 기존 방법 |
+| `find_peaks` | 6.1 s | 국소 최대만 본다. 기존 방법 |
 | `daofind` | 23 s | PSF 모양까지 본다. 붙어 있는 spot에 강하다 |
 
 ```python

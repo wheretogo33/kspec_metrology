@@ -118,7 +118,7 @@ class MetrologyRun:
                  , nwindow=40
                  , niter_recenter=0
                  , apply_pinhole_offset=True
-                 , finder='find_peaks'
+                 , finder='sep'
                  , finder_opts=None
                  , background=None
                  , background_opts=None

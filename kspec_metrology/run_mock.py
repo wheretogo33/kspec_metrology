@@ -74,6 +74,9 @@ def main(argv=None):
     ap.add_argument('--tile', default='test', help='타일 이름 (파일 이름에 쓰인다)')
     ap.add_argument('--itrial', type=int, default=1, help='trial 번호')
     ap.add_argument('--nexposure', type=int, default=1, help='이미지 장수')
+    ap.add_argument('--finder', default='sep',
+                    choices=['sep', 'find_peaks', 'daofind', 'segmentation'],
+                    help='peak 검출 방법 (peakfind 참고)')
     ap.add_argument('--mode', default='Raw', choices=['Raw', 'Predict'],
                     help='peak 검출 방식')
     ap.add_argument('--threshold', type=float, default=3e3,
@@ -122,6 +125,7 @@ def main(argv=None):
             data_dir=image_dir,
             head=naming.image_head(args.tile, args.itrial),
             mode=args.mode,
+            finder=args.finder,
             threshold=args.threshold,
             nwindow=args.nwindow,
             # mock은 fiducial 핀홀이 홀 중심에 있다고 보고 만든 것이다
@@ -140,6 +144,7 @@ def main(argv=None):
                            data_dir=image_dir,
                            json_dir=out_dir,
                            mode=args.mode,
+                           finder=args.finder,
                            threshold=args.threshold,
                            nwindow=args.nwindow,
                            apply_pinhole_offset=False,

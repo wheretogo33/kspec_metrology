@@ -22,7 +22,7 @@ def findpeak(npeaks
             , niter_refine=2
             , niter_recenter=0
             , max_shift=None
-            , finder='find_peaks'
+            , finder='sep'
             , finder_opts=None
             , background=None
             , background_opts=None
