@@ -93,6 +93,8 @@ class MetrologyRun:
         threshold   : 'Raw' mode의 검출 문턱값
         nwindow     : center of mass를 잴 crop 반폭 [pixel]. fiber 사이 최소
                       이격 거리에 맞춰야 한다 (mtlcal 참고)
+        apply_pinhole_offset : fiducial 기준 좌표에 핀홀 오프셋을 더할지
+                      (mock 분석 때만 False)
         niter_recenter : 창을 무게중심으로 옮겨 다시 재는 횟수 (findpeak 참고)
         finder      : peak 검출 방법. 'find_peaks'(기본), 'daofind', 'sep',
                       'segmentation' (peakfind 참고)
@@ -115,6 +117,7 @@ class MetrologyRun:
                  , threshold=3e3
                  , nwindow=40
                  , niter_recenter=0
+                 , apply_pinhole_offset=True
                  , finder='find_peaks'
                  , finder_opts=None
                  , background=None
@@ -149,6 +152,7 @@ class MetrologyRun:
         self.threshold = threshold
         self.nwindow = nwindow
         self.niter_recenter = niter_recenter
+        self.apply_pinhole_offset = apply_pinhole_offset
         self.finder = finder
         self.finder_opts = finder_opts
         self.background = background
@@ -217,6 +221,7 @@ class MetrologyRun:
                       , threshold=self.threshold
                       , nwindow=self.nwindow
                       , niter_recenter=self.niter_recenter
+                      , apply_pinhole_offset=self.apply_pinhole_offset
                       , finder=self.finder
                       , finder_opts=self.finder_opts
                       , background=self.background

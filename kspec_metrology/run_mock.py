@@ -124,6 +124,8 @@ def main(argv=None):
             mode=args.mode,
             threshold=args.threshold,
             nwindow=args.nwindow,
+            # mock은 fiducial 핀홀이 홀 중심에 있다고 보고 만든 것이다
+            apply_pinhole_offset=False,
             nexposure=args.nexposure,
             target_file=target_file,
             json_dir=out_dir,
@@ -140,6 +142,7 @@ def main(argv=None):
                            mode=args.mode,
                            threshold=args.threshold,
                            nwindow=args.nwindow,
+                           apply_pinhole_offset=False,
                            nexposure=args.nexposure,
                            tile=args.tile,
                            max_trial=args.itrial)

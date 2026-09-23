@@ -22,13 +22,19 @@ ALPHA_SUFFIX = 'a'
 BETA_SUFFIX = 'b'
 
 
-def load_configuration(target_file=None, apply_zenith_offset=True):
+def load_configuration(target_file=None, apply_zenith_offset=True,
+                       apply_pinhole_offset=True):
     """설계 좌표와 목표 위치를 읽는다.
 
     target 파일의 목표 위치 (xp, yp)는 천정거리 0도 기준이라, 관측 고도가 함께
     적혀 있으면 ADC 광학계의 sky -> focal plane 매핑 변화만큼 옮겨준다
     (zenith_offset 참고). 고도 정보가 없으면 보정 없이 그대로 쓴다.
     fiducial은 초점면에 박혀 있는 물체라 보정하지 않는다.
+
+    fiducial 기준 좌표에는 핀홀이 홀 중심에서 치우친 양(dx, dy)을 더한다
+    (fiber_config.pinhole_offsets). 이 값이 fitdistortion의 기준이 되므로
+    빼먹으면 그만큼 왜곡 fit에 그대로 들어간다. 파일이 없으면 건너뛴다.
+    xorigin, yorigin은 홀 설계 좌표 그대로 둔다.
 
     반환:
         xorigin, yorigin : positioner 회전 중심 (fiber -> fiducial 순)
@@ -58,6 +64,32 @@ def load_configuration(target_file=None, apply_zenith_offset=True):
     x, y = np.copy(xorigin), np.copy(yorigin)
     fid_flag = np.zeros(x.size, dtype=bool)
     fid_flag[nfib:] = True
+
+    #---Fiducial 핀홀 오프셋----------------------------------------------------
+    if apply_pinhole_offset:
+        off = cfg.pinhole_offsets()
+        if not off:
+            log.warning("No fiducial pinhole offsets found (%s); "
+                        "using the hole centres as the fiducial reference",
+                        os.path.basename(cfg.FIDUCIAL_PINHOLE_MAP_PATH))
+        else:
+            # fiducial에만 더한다. fiber 자리는 곧 target 파일 값으로 덮인다.
+            dxy = np.array([off[i] if (f and i in off) else (0., 0.)
+                            for i, f in zip(pick_ids, fid_flag)])
+            x += dxy[:, 0]
+            y += dxy[:, 1]
+
+            nhit = int(np.any(dxy != 0., axis=1).sum())
+            log.info("Fiducial pinhole offsets applied to %d/%d fiducials "
+                     "(max %.0f um)", nhit, int(fid_flag.sum()),
+                     np.hypot(*dxy.T).max()*1e3)
+
+            unused = [i for i in off
+                      if i not in {h for h, f in zip(pick_ids, fid_flag) if f}]
+            if unused:
+                log.warning("Pinhole map lists %d hole(s) that are not used as "
+                            "fiducials; ignored: %s", len(unused),
+                            ', '.join(sorted(unused)[:10]))
 
     target = read_target(target_file)
     x[:nfib] = np.asarray(target['xp'], dtype=float)[:nfib]
@@ -179,6 +211,7 @@ def mtlcal(data_dir='./MTL/data/'
            , threshold=3e3
            , nwindow=40
            , niter_recenter=0
+           , apply_pinhole_offset=True
            , finder='find_peaks'
            , finder_opts=None
            , background=None
@@ -199,6 +232,10 @@ def mtlcal(data_dir='./MTL/data/'
     이므로, fiber 사이 최소 이격 거리의 절반보다 작아야 한다.
     최소 이격 3mm 기준이면 nwindow <= 40 이어야 한다.
 
+    apply_pinhole_offset 은 fiducial 기준 좌표에 핀홀 오프셋을 더할지다
+    (load_configuration 참고). 핀홀이 홀 중심에 있다고 보고 만든 mock
+    이미지를 분석할 때만 False로 둔다.
+
     niter_recenter 는 창을 무게중심으로 옮겨 다시 재는 횟수다 (findpeak 참고).
     PSF가 창에 비해 크면 켜는 것이 좋다.
 
@@ -217,7 +254,8 @@ def mtlcal(data_dir='./MTL/data/'
     """
     log = get_logger()
 
-    xorigin, yorigin, x, y, fid_flag, nfib = load_configuration(target_file)
+    xorigin, yorigin, x, y, fid_flag, nfib = load_configuration(
+        target_file, apply_pinhole_offset=apply_pinhole_offset)
 
     #---관측된 peak 위치--------------------------------------------------------
     npeaks = x.size

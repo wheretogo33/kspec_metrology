@@ -54,6 +54,66 @@ if not os.path.exists(FIBER_TABLE_PATH):
 # 관측할 타일/타겟 정보 (fiber별 목표 위치 xp, yp)
 TARGET_INFO_PATH = '/home/kspecmtl/work/KSPEC_ICS/MTL/target/object.info'
 
+# Fiducial 핀홀의 실제 위치.
+#
+# fiducial은 홀 한가운데가 아니라 조금 치우쳐 박혀 있고, 그 치우친 양(dx, dy)을
+# 따로 재서 npz로 들고 있다. 그 npz의 index가 어느 홀인지는 map 파일에 적는다
+# (현장에서 핀홀을 옮기면 map 파일의 ID만 고치면 된다).
+#
+# 두 파일이 다 있으면 load_configuration이 fiducial 기준 좌표를
+# '표의 홀 좌표 + dx, dy' 로 쓴다. 없으면 표의 홀 좌표를 그대로 쓴다.
+FIDUCIAL_PINHOLE_LOC_PATH = os.environ.get('KSPEC_FIDUCIAL_PINHOLE_LOC') or str(
+    Path(__file__).with_name('Fiducial_pinhole_loc.npz'))
+FIDUCIAL_PINHOLE_MAP_PATH = os.environ.get('KSPEC_FIDUCIAL_PINHOLE_MAP') or str(
+    Path(__file__).with_name('Fiducial_pinhole_map.txt'))
+
+
+def pinhole_offsets(map_path=None, loc_path=None):
+    """Hole ID -> (dx, dy) [mm]. 파일이 없으면 빈 dict을 돌려준다.
+
+    map 파일은 "index  ID" 두 칸이고 '#' 뒤는 주석이다. ID가 '-' 인 줄은
+    쓰지 않는 index로 보고 건너뛴다.
+    """
+    map_path = map_path or FIDUCIAL_PINHOLE_MAP_PATH
+    loc_path = loc_path or FIDUCIAL_PINHOLE_LOC_PATH
+
+    missing = [q for q in (map_path, loc_path) if not os.path.exists(q)]
+    if missing:
+        return {}
+
+    with np.load(loc_path) as d:
+        off = {int(i): (float(a), float(b))
+               for i, a, b in zip(d['index'], d['dx'], d['dy'])}
+
+    out = {}
+    with open(map_path) as ff:
+        for nline, line in enumerate(ff, 1):
+            line = line.split('#')[0].strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) != 2:
+                raise ValueError(
+                    f"{map_path}:{nline}: 'index ID' 두 칸이어야 한다: {line!r}")
+            idx, hole = parts
+            if hole == '-':
+                continue
+            try:
+                key = int(idx)
+            except ValueError:
+                raise ValueError(
+                    f"{map_path}:{nline}: index가 정수가 아니다: {idx!r}") from None
+            if key not in off:
+                raise ValueError(
+                    f"{map_path}:{nline}: index {key} 가 "
+                    f"{os.path.basename(loc_path)} 에 없다")
+            if hole in out:
+                raise ValueError(f"{map_path}:{nline}: {hole} 가 중복이다")
+            out[hole] = off[key]
+
+    return out
+
+
 # arm 길이 측정값이 없는 positioner에 쓰는 설계값 (arm1, arm2) [mm]
 DEFAULT_ARM = (5.2, 11.6)
 

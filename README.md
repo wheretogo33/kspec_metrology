@@ -163,6 +163,32 @@ ARM_OVERRIDES = {
 }
 ```
 
+### Fiducial 핀홀 위치
+
+fiducial은 홀 한가운데가 아니라 조금 치우쳐 박혀 있다. 그 치우친 양을 따로 재서
+두 파일로 들고 있고, `load_configuration` 이 fiducial 기준 좌표를
+**표의 홀 좌표 + (dx, dy)** 로 만든다. 이 좌표가 `fitdistortion` 의 기준이므로
+빼먹으면 그만큼 왜곡 fit에 그대로 들어간다.
+
+| 파일 | 내용 |
+|---|---|
+| `analysis/Fiducial_pinhole_loc.npz` | `index`, `dx`, `dy` [mm]. 측정값 |
+| `analysis/Fiducial_pinhole_map.txt` | `index` 가 어느 Hole ID인지. **현장에서 손으로 고치는 파일** |
+
+map 파일은 `index  ID` 두 칸이고 `#` 뒤는 주석이다. 핀홀을 옮기면 ID만 고치면
+되고 코드는 건드릴 필요가 없다. 쓰지 않는 index는 ID를 `-` 로 두거나 줄을
+지운다. 두 파일 중 하나라도 없으면 경고를 남기고 홀 좌표를 그대로 쓴다.
+
+```
+# index  ID
+      1  A0     # X  -58.8000  Y  101.8446   dx  -0.0829  dy  +0.0112
+      2  A6     ...
+```
+
+경로는 `KSPEC_FIDUCIAL_PINHOLE_MAP` / `KSPEC_FIDUCIAL_PINHOLE_LOC` 로 바꿀 수
+있다. 핀홀이 홀 중심에 있다고 보고 만든 mock을 분석할 때는
+`apply_pinhole_offset=False` 로 끈다 (`run_mock` 이 그렇게 한다).
+
 ### 카메라 배율
 
 `analysis/utils.py` 의 `CAMERA2FOCAL_M` 이 camera -> focal 배율 초기값이다.
