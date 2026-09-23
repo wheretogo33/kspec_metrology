@@ -218,8 +218,8 @@ def findpeak(npeaks
     xobs = np.zeros(npeaks)
     yobs = np.zeros(npeaks)
 
-    if ReturnSpotSize: # SW added on 2026-01-31
-        xfwhm, yfwhm = np.zeros(npeaks), np.zeros(npeaks)
+    if ReturnSpotSize:
+        xsigma, ysigma = np.zeros(npeaks), np.zeros(npeaks)
 
     if ReturnFiberImage:
         im_crop_full = np.zeros( (npeaks, nwindow*2, nwindow*2))
@@ -248,10 +248,11 @@ def findpeak(npeaks
         shifts[ifiber] = np.hypot(i0-icen[ifiber], j0-jcen[ifiber])
 
         # spot size는 background 제거를 거친 im_crop의 중앙 절반 window에서 측정
-        if ReturnSpotSize: # SW added on 2026-01-31
+        if ReturnSpotSize:
             half = nwindow // 2
             core = slice(nwindow-half, nwindow+half)
-            xfwhm[ifiber], yfwhm[ifiber] = measure_sigma(im_crop[core, core], x_crop[core], y_crop[core])
+            xsigma[ifiber], ysigma[ifiber] = measure_sigma(
+                im_crop[core, core], x_crop[core], y_crop[core])
 
         if ReturnFiberImage:
             im_crop_full[ifiber] = im_crop
@@ -270,12 +271,14 @@ def findpeak(npeaks
     #---Return------------------------------------------------------------------------------------------------------------------------
     # 기본  : im, xobs, yobs, peak_value
     # option: ReturnFiberImage -> im 다음에 im_crop_full 삽입
-    #         ReturnSpotSize   -> 끝에 xfwhm, yfwhm 추가
+    #         ReturnSpotSize   -> 끝에 xsigma, ysigma 추가 [mm].
+    #                             FWHM이 아니라 2차 모멘트(sigma)다.
+    #                             픽셀로 보려면 3.76e-3으로 나눈다.
     out = [im]
     if ReturnFiberImage:
         out.append(im_crop_full)
     out += [xobs, yobs, peak_value]
     if ReturnSpotSize:
-        out += [xfwhm, yfwhm]
+        out += [xsigma, ysigma]
 
     return tuple(out)
