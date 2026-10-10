@@ -103,7 +103,7 @@ fiber 구성은 `analysis/fiber_config.py` 에서 정한다. fiber 개수와 arm
 
 ### 어떤 홀을 쓰는가
 
-`analysis/Fiber_Configuration_250415.txt` 의 `FiducialFlag` 를 그대로 따른다.
+`analysis/Fiber_Configuration_config73.txt` 의 `FiducialFlag` 를 그대로 따른다.
 
 | FiducialFlag | 쓰임 |
 |---|---|
@@ -112,7 +112,8 @@ fiber 구성은 `analysis/fiber_config.py` 에서 정한다. fiber 개수와 arm
 | `-9` | 쓰지 않음 |
 
 즉 fiber를 넣고 빼려면 표의 `FiducialFlag` 를 고치면 되고, `fiber_config.py`
-는 건드릴 필요가 없다. 현재 구성은 positioner 151개 + fiducial 30개다.
+는 건드릴 필요가 없다. 현재 기본 구성(`config73`, 홀 간격 d = 19 mm)은
+positioner 73개 + fiducial 30개 + 미장착 45개다.
 positioner를 꽂지 않은 홀은 행을 지우지 말고 `-9` 로 두는 편이 낫다. 전체 홀
 지도가 남아 어느 자리가 비었는지 보이고, `-9` 행은 positioner 목록
 (`fiber_config.load_fibers`)과 fiducial 목록(`mtlcal.load_configuration`)
@@ -126,7 +127,9 @@ positioner를 줄였는데 예전 target 파일을 그대로 쓰면 엉뚱한 fi
 
 ### 설정이 여러 개일 때
 
-표의 기본 위치는 패키지 안(`analysis/Fiber_Configuration_250415.txt`)이다.
+표의 기본 위치는 패키지 안(`analysis/Fiber_Configuration_config73.txt`)이다.
+같이 들어 있는 표로 `Fiber_Configuration_250415.txt`(d = 16.8 mm, positioner
+151개)와 `Fiber_Configuration_config55.txt`(d = 16.8 mm, 55개)가 있다.
 설정을 바꿔 가며 쓸 거면 표를 패키지 밖에 이름 붙여 따로 두고
 `KSPEC_FIBER_TABLE` 로 고르는 편이 낫다.
 

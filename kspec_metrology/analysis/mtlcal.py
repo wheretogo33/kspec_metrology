@@ -92,8 +92,23 @@ def load_configuration(target_file=None, apply_zenith_offset=True,
                             ', '.join(sorted(unused)[:10]))
 
     target = read_target(target_file)
-    x[:nfib] = np.asarray(target['xp'], dtype=float)[:nfib]
-    y[:nfib] = np.asarray(target['yp'], dtype=float)[:nfib]
+    xp = np.asarray(target['xp'], dtype=float)
+    yp = np.asarray(target['yp'], dtype=float)
+
+    # 개수가 다르면 예전에는 앞에서 잘라 쓰며 조용히 지나갔다. fiber 표를 바꾸고
+    # target 파일을 안 바꾼 경우가 대표적인데, 엉뚱한 fiber에 엉뚱한 목표가
+    # 붙으므로 바로 멈춘다.
+    if xp.size != nfib or yp.size != nfib:
+        raise ValueError(
+            f"target 파일의 xp/yp 개수({xp.size}/{yp.size})가 fiber 표의 "
+            f"positioner 개수({nfib})와 다릅니다.\n"
+            f"  표    : {cfg.FIBER_TABLE_PATH}\n"
+            f"  target: {target_file or cfg.TARGET_INFO_PATH}\n"
+            "표를 바꿨다면 target 파일도 같은 순서로 다시 만들어야 합니다 "
+            "(KSPEC_FIBER_TABLE로 표를 지정할 수 있습니다).")
+
+    x[:nfib] = xp
+    y[:nfib] = yp
 
     #---관측 고도에 따른 보정 (fiber만)-----------------------------------------
     if apply_zenith_offset:
