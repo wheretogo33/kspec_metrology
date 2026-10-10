@@ -190,8 +190,17 @@ map 파일은 `index  ID` 두 칸이고 `#` 뒤는 주석이다. 핀홀을 옮�
 ```
 
 경로는 `KSPEC_FIDUCIAL_PINHOLE_MAP` / `KSPEC_FIDUCIAL_PINHOLE_LOC` 로 바꿀 수
-있다. 핀홀이 홀 중심에 있다고 보고 만든 mock을 분석할 때는
-`apply_pinhole_offset=False` 로 끈다 (`run_mock` 이 그렇게 한다).
+있다.
+
+**기본값은 `apply_pinhole_offset=False` 로 꺼져 있다.** 핀홀 위치는 plate마다
+다시 재야 하는데, 표를 바꿔도 fiducial ID는 상당수 그대로라서 옛 plate의 값이
+경고 없이 적용될 수 있기 때문이다 (지금 들어 있는 파일은 d = 16.8 mm plate
+기준이고, 기본 표 `config73` 과는 fiducial 30개 중 25개가 ID만 겹친다).
+쓰는 plate에서 측정한 파일로 갈아 끼운 뒤 켜면 된다.
+
+```python
+mtlcal(..., apply_pinhole_offset=True)
+```
 
 ### 카메라 배율
 

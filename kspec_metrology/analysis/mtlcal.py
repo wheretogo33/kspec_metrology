@@ -23,7 +23,7 @@ BETA_SUFFIX = 'b'
 
 
 def load_configuration(target_file=None, apply_zenith_offset=True,
-                       apply_pinhole_offset=True):
+                       apply_pinhole_offset=False):
     """설계 좌표와 목표 위치를 읽는다.
 
     target 파일의 목표 위치 (xp, yp)는 천정거리 0도 기준이라, 관측 고도가 함께
@@ -31,10 +31,15 @@ def load_configuration(target_file=None, apply_zenith_offset=True,
     (zenith_offset 참고). 고도 정보가 없으면 보정 없이 그대로 쓴다.
     fiducial은 초점면에 박혀 있는 물체라 보정하지 않는다.
 
-    fiducial 기준 좌표에는 핀홀이 홀 중심에서 치우친 양(dx, dy)을 더한다
-    (fiber_config.pinhole_offsets). 이 값이 fitdistortion의 기준이 되므로
-    빼먹으면 그만큼 왜곡 fit에 그대로 들어간다. 파일이 없으면 건너뛴다.
+    apply_pinhole_offset=True 면 fiducial 기준 좌표에 핀홀이 홀 중심에서 치우친
+    양(dx, dy)을 더한다 (fiber_config.pinhole_offsets). 이 값이 fitdistortion의
+    기준이 되므로 맞게 넣으면 그만큼 왜곡 fit이 정확해진다.
     xorigin, yorigin은 홀 설계 좌표 그대로 둔다.
+
+    기본값이 False인 이유: 핀홀 측정값은 plate마다 다시 재야 하는데, 표를 바꿔도
+    fiducial ID가 상당수 겹치는 탓에 옛 plate의 값이 조용히 적용될 수 있다.
+    지금 들어 있는 파일은 d = 16.8 mm plate 기준이다. 새로 측정해 파일을 갈아
+    끼운 뒤 True로 켜면 된다.
 
     반환:
         xorigin, yorigin : positioner 회전 중심 (fiber -> fiducial 순)
@@ -226,7 +231,7 @@ def mtlcal(data_dir='./MTL/data/'
            , threshold=3e3
            , nwindow=40
            , niter_recenter=0
-           , apply_pinhole_offset=True
+           , apply_pinhole_offset=False
            , finder='sep'
            , finder_opts=None
            , background=None
@@ -248,8 +253,8 @@ def mtlcal(data_dir='./MTL/data/'
     최소 이격 3mm 기준이면 nwindow <= 40 이어야 한다.
 
     apply_pinhole_offset 은 fiducial 기준 좌표에 핀홀 오프셋을 더할지다
-    (load_configuration 참고). 핀홀이 홀 중심에 있다고 보고 만든 mock
-    이미지를 분석할 때만 False로 둔다.
+    (load_configuration 참고). 기본값은 False이고, 쓰는 plate에서 측정한
+    핀홀 파일을 넣은 뒤에 True로 켠다.
 
     niter_recenter 는 창을 무게중심으로 옮겨 다시 재는 횟수다 (findpeak 참고).
     PSF가 창에 비해 크면 켜는 것이 좋다.
