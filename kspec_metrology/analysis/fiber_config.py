@@ -114,6 +114,82 @@ def pinhole_offsets(map_path=None, loc_path=None):
     return out
 
 
+# 실측 기하 (plate 중심 기준).
+#
+# 설계도 값 대신 실제로 재서 쓰려는 것이 세 가지다.
+#   1. positioner 회전 중심 위치 (X, Y)
+#   2. fiducial 핀홀 위치        (X, Y)
+#   3. positioner arm 길이       (arm1, arm2)
+#
+# 셋을 한 파일에 홀 ID로 적는다. 아직 안 잰 값은 '-' 로 두면 그 항목만 설계값을
+# 쓴다. 측정이 끝나는 대로 한 줄씩 채워 나가면 된다.
+#
+#   # ID     X          Y        arm1    arm2
+#   C4      -9.5123    82.2810   5.21   11.58
+#   D2       -          -        5.19   11.61     <- arm만 쟀을 때
+#
+# 기본은 꺼져 있다 (USE_MEASURED=False). 켜는 방법은 두 가지다.
+#   - 환경변수 : KSPEC_USE_MEASURED=1
+#   - 호출 인자: mtlcal(..., use_measured=True)
+# 파일 경로는 KSPEC_MEASURED_GEOMETRY 로 바꿀 수 있다.
+MEASURED_GEOMETRY_ENV = 'KSPEC_MEASURED_GEOMETRY'
+DEFAULT_MEASURED_GEOMETRY_PATH = str(
+    Path(__file__).with_name('Measured_Geometry.txt'))
+MEASURED_GEOMETRY_PATH = (os.environ.get(MEASURED_GEOMETRY_ENV)
+                          or DEFAULT_MEASURED_GEOMETRY_PATH)
+
+USE_MEASURED_ENV = 'KSPEC_USE_MEASURED'
+USE_MEASURED = os.environ.get(USE_MEASURED_ENV, '').strip().lower() in (
+    '1', 'true', 'yes', 'on')
+
+
+def measured_geometry(path=None):
+    """홀 ID -> {'x':, 'y':, 'arm1':, 'arm2':}. 안 잰 항목은 None.
+
+    'ID X Y arm1 arm2' 다섯 칸이고 '#' 뒤는 주석이다. 값이 '-' 면 안 잰 것으로
+    보고 그 항목만 설계값을 쓴다. 파일이 없으면 빈 dict을 돌려준다.
+    """
+    path = path or MEASURED_GEOMETRY_PATH
+    if not os.path.exists(path):
+        return {}
+
+    out = {}
+    with open(path) as ff:
+        for nline, line in enumerate(ff, 1):
+            line = line.split('#')[0].strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) != 5:
+                raise ValueError(
+                    f"{path}:{nline}: 'ID X Y arm1 arm2' 다섯 칸이어야 한다: "
+                    f"{line!r}")
+            hole = parts[0]
+            if hole in out:
+                raise ValueError(f"{path}:{nline}: {hole} 가 중복이다")
+
+            def val(tok, name):
+                if tok == '-':
+                    return None
+                try:
+                    return float(tok)
+                except ValueError:
+                    raise ValueError(
+                        f"{path}:{nline}: {name} 가 숫자가 아니다: "
+                        f"{tok!r}") from None
+
+            out[hole] = dict(zip(('x', 'y', 'arm1', 'arm2'),
+                                 (val(t, n) for t, n in
+                                  zip(parts[1:], ('X', 'Y', 'arm1', 'arm2')))))
+
+    return out
+
+
+def _use_measured(flag):
+    """None이면 모듈 기본값(USE_MEASURED)을 쓴다."""
+    return USE_MEASURED if flag is None else bool(flag)
+
+
 # arm 길이 측정값이 없는 positioner에 쓰는 설계값 (arm1, arm2) [mm]
 DEFAULT_ARM = (5.2, 11.6)
 
@@ -170,7 +246,24 @@ def fiber_ids():
     return [row[0] for row in FIBERS]
 
 
-def arm_lengths():
-    """FIBERS 순서 그대로의 (arm1, arm2) 배열."""
-    return (np.array([row[1] for row in FIBERS], dtype=float),
-            np.array([row[2] for row in FIBERS], dtype=float))
+def arm_lengths(use_measured=None):
+    """FIBERS 순서 그대로의 (arm1, arm2) 배열.
+
+    use_measured 면 실측 파일에 있는 값으로 바꾼다 (measured_geometry 참고).
+    안 잰 positioner는 설계값을 그대로 쓴다.
+    """
+    a1 = np.array([row[1] for row in FIBERS], dtype=float)
+    a2 = np.array([row[2] for row in FIBERS], dtype=float)
+
+    if _use_measured(use_measured):
+        meas = measured_geometry()
+        for k, hole in enumerate(fiber_ids()):
+            m = meas.get(hole)
+            if m is None:
+                continue
+            if m['arm1'] is not None:
+                a1[k] = m['arm1']
+            if m['arm2'] is not None:
+                a2[k] = m['arm2']
+
+    return a1, a2

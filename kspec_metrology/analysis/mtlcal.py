@@ -23,7 +23,7 @@ BETA_SUFFIX = 'b'
 
 
 def load_configuration(target_file=None, apply_zenith_offset=True,
-                       apply_pinhole_offset=False):
+                       apply_pinhole_offset=False, use_measured=None):
     """설계 좌표와 목표 위치를 읽는다.
 
     target 파일의 목표 위치 (xp, yp)는 천정거리 0도 기준이라, 관측 고도가 함께
@@ -35,6 +35,11 @@ def load_configuration(target_file=None, apply_zenith_offset=True,
     양(dx, dy)을 더한다 (fiber_config.pinhole_offsets). 이 값이 fitdistortion의
     기준이 되므로 맞게 넣으면 그만큼 왜곡 fit이 정확해진다.
     xorigin, yorigin은 홀 설계 좌표 그대로 둔다.
+
+    use_measured 면 설계 좌표와 arm 길이를 실측값으로 바꾼다
+    (fiber_config.measured_geometry). None이면 fiber_config.USE_MEASURED를
+    따르고 그 기본값은 False다. 실측 위치가 있는 fiducial에는 핀홀 오프셋을
+    더하지 않는다 (이중 계산이 되므로).
 
     기본값이 False인 이유: 핀홀 측정값은 plate마다 다시 재야 하는데, 표를 바꿔도
     fiducial ID가 상당수 겹치는 탓에 옛 plate의 값이 조용히 적용될 수 있다.
@@ -66,6 +71,32 @@ def load_configuration(target_file=None, apply_zenith_offset=True,
     xy = np.array([xy_map[i] for i in pick_ids], dtype=float)
     xorigin, yorigin = xy[:, 0], xy[:, 1]
 
+    #---설계 좌표를 실측값으로 교체------------------------------------------
+    # positioner는 회전 중심, fiducial은 핀홀 위치다. 안 잰 홀은 설계값을 쓴다.
+    measured = {}
+    if cfg._use_measured(use_measured):
+        measured = cfg.measured_geometry()
+        if not measured:
+            raise FileNotFoundError(
+                "use_measured가 켜져 있는데 실측 기하 파일이 없습니다: "
+                f"{cfg.MEASURED_GEOMETRY_PATH}")
+
+        nhit = 0
+        for k, hole in enumerate(pick_ids):
+            m = measured.get(hole)
+            if m is None or m['x'] is None or m['y'] is None:
+                continue
+            xorigin[k], yorigin[k] = m['x'], m['y']
+            nhit += 1
+
+        unknown = [h for h in measured if h not in set(pick_ids)]
+        log.info("Measured geometry %s: %d/%d holes replaced",
+                 cfg.MEASURED_GEOMETRY_PATH, nhit, len(pick_ids))
+        if unknown:
+            log.warning("Measured file lists %d hole(s) not in the fiber "
+                        "table; ignored: %s", len(unknown),
+                        ', '.join(sorted(unknown)[:10]))
+
     x, y = np.copy(xorigin), np.copy(yorigin)
     fid_flag = np.zeros(x.size, dtype=bool)
     fid_flag[nfib:] = True
@@ -79,7 +110,13 @@ def load_configuration(target_file=None, apply_zenith_offset=True,
                         os.path.basename(cfg.FIDUCIAL_PINHOLE_MAP_PATH))
         else:
             # fiducial에만 더한다. fiber 자리는 곧 target 파일 값으로 덮인다.
-            dxy = np.array([off[i] if (f and i in off) else (0., 0.)
+            def _done(h):
+                m = measured.get(h)
+                return m is not None and m['x'] is not None and m['y'] is not None
+
+            # 실측 위치로 이미 바꾼 fiducial에는 오프셋을 또 더하지 않는다
+            dxy = np.array([off[i] if (f and i in off and not _done(i))
+                            else (0., 0.)
                             for i, f in zip(pick_ids, fid_flag)])
             x += dxy[:, 0]
             y += dxy[:, 1]
@@ -134,9 +171,9 @@ def load_configuration(target_file=None, apply_zenith_offset=True,
     return xorigin, yorigin, x, y, fid_flag, nfib
 
 
-def _arm_angles(xorigin, yorigin, xtarget, ytarget):
+def _arm_angles(xorigin, yorigin, xtarget, ytarget, use_measured=None):
     """각 positioner가 (xtarget, ytarget)을 가리키는 (theta, phi)를 구한다."""
-    arm1s, arm2s = cfg.arm_lengths()
+    arm1s, arm2s = cfg.arm_lengths(use_measured)
 
     theta = np.zeros(arm1s.size)
     phi = np.zeros(arm1s.size)
@@ -208,15 +245,17 @@ def save_angles(json_dir, target_name, itrial, angles):
     return path
 
 
-def save_initial_angles(json_dir, target_name, target_file=None):
+def save_initial_angles(json_dir, target_name, target_file=None,
+                        use_measured=None):
     """관측 전에 목표 각도를 Trial 0 json으로 저장한다.
 
     이후 trial의 누적 각도는 이 파일에서 출발한다.
     """
     log = get_logger()
 
-    xorigin, yorigin, x, y, _, _ = load_configuration(target_file)
-    theta_true, phi_true = _arm_angles(xorigin, yorigin, x, y)
+    xorigin, yorigin, x, y, _, _ = load_configuration(
+        target_file, use_measured=use_measured)
+    theta_true, phi_true = _arm_angles(xorigin, yorigin, x, y, use_measured)
 
     angles = _flatten_angles(theta_true, phi_true)
     path = save_angles(json_dir, target_name, 0, angles)
@@ -232,6 +271,7 @@ def mtlcal(data_dir='./MTL/data/'
            , nwindow=40
            , niter_recenter=0
            , apply_pinhole_offset=False
+           , use_measured=None
            , finder='sep'
            , finder_opts=None
            , background=None
@@ -251,6 +291,9 @@ def mtlcal(data_dir='./MTL/data/'
     반폭을 focal plane 거리로 환산하면 nwindow * 3.76e-3 mm/px * 배율(~8.47)
     이므로, fiber 사이 최소 이격 거리의 절반보다 작아야 한다.
     최소 이격 3mm 기준이면 nwindow <= 40 이어야 한다.
+
+    use_measured 는 설계 좌표와 arm 길이를 실측값으로 바꿀지다
+    (load_configuration 참고). None이면 fiber_config.USE_MEASURED를 따른다.
 
     apply_pinhole_offset 은 fiducial 기준 좌표에 핀홀 오프셋을 더할지다
     (load_configuration 참고). 기본값은 False이고, 쓰는 plate에서 측정한
@@ -275,7 +318,8 @@ def mtlcal(data_dir='./MTL/data/'
     log = get_logger()
 
     xorigin, yorigin, x, y, fid_flag, nfib = load_configuration(
-        target_file, apply_pinhole_offset=apply_pinhole_offset)
+        target_file, apply_pinhole_offset=apply_pinhole_offset,
+        use_measured=use_measured)
 
     #---관측된 peak 위치--------------------------------------------------------
     npeaks = x.size
@@ -301,8 +345,9 @@ def mtlcal(data_dir='./MTL/data/'
                                               , xoff_guess, yoff_guess)
 
     #---보정각 계산 (fiber만)---------------------------------------------------
-    theta_true, phi_true = _arm_angles(xorigin, yorigin, x, y)
-    theta_obs, phi_obs = _arm_angles(xorigin, yorigin, xfocal, yfocal)
+    theta_true, phi_true = _arm_angles(xorigin, yorigin, x, y, use_measured)
+    theta_obs, phi_obs = _arm_angles(xorigin, yorigin, xfocal, yfocal,
+                                     use_measured)
 
     dtheta, dphi = _wrap(theta_true - theta_obs, phi_true - phi_obs)
 

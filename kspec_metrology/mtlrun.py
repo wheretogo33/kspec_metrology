@@ -93,6 +93,8 @@ class MetrologyRun:
         threshold   : 'Raw' mode의 검출 문턱값
         nwindow     : center of mass를 잴 crop 반폭 [pixel]. fiber 사이 최소
                       이격 거리에 맞춰야 한다 (mtlcal 참고)
+        use_measured : 설계 좌표와 arm 길이를 실측값으로 바꿀지. None이면
+                      fiber_config.USE_MEASURED (기본 False)
         apply_pinhole_offset : fiducial 기준 좌표에 핀홀 오프셋을 더할지.
                       기본 False. 쓰는 plate에서 측정한 핀홀 파일을 넣은 뒤
                       True로 켠다 (load_configuration 참고)
@@ -119,6 +121,7 @@ class MetrologyRun:
                  , nwindow=40
                  , niter_recenter=0
                  , apply_pinhole_offset=False
+                 , use_measured=None
                  , finder='sep'
                  , finder_opts=None
                  , background=None
@@ -154,6 +157,7 @@ class MetrologyRun:
         self.nwindow = nwindow
         self.niter_recenter = niter_recenter
         self.apply_pinhole_offset = apply_pinhole_offset
+        self.use_measured = use_measured
         self.finder = finder
         self.finder_opts = finder_opts
         self.background = background
@@ -201,7 +205,8 @@ class MetrologyRun:
                       "max_trial %s", self.tile, self.tolerance, self.metric,
                       self.max_trial if self.max_trial is not None else 'none')
 
-        save_initial_angles(self.json_dir, self.tile, self.target_file)
+        save_initial_angles(self.json_dir, self.tile, self.target_file,
+                            use_measured=self.use_measured)
 
         return self.json_path(0)
 
@@ -223,6 +228,7 @@ class MetrologyRun:
                       , nwindow=self.nwindow
                       , niter_recenter=self.niter_recenter
                       , apply_pinhole_offset=self.apply_pinhole_offset
+                      , use_measured=self.use_measured
                       , finder=self.finder
                       , finder_opts=self.finder_opts
                       , background=self.background

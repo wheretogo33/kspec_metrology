@@ -125,6 +125,46 @@ positioner를 꽂지 않은 홀은 행을 지우지 말고 `-9` 로 두는 편�
 positioner를 줄였는데 예전 target 파일을 그대로 쓰면 엉뚱한 fiber에 엉뚱한
 목표가 붙는다.
 
+### 설계값 대신 실측값 쓰기
+
+실험으로 plate 중심 기준 실제 기하를 재면 세 가지를 설계값 대신 쓸 수 있다.
+
+1. positioner 회전 중심 위치
+2. fiducial 핀홀 위치
+3. positioner arm 길이
+
+셋을 `analysis/Measured_Geometry.txt` 한 파일에 홀 ID로 적는다. 아직 안 잰
+값은 `-` 로 두면 **그 항목만** 설계값을 쓰므로, 측정이 끝나는 대로 한 줄씩
+채워 나가면 된다. 같은 폴더의 `Measured_Geometry.txt.template` 을 복사해
+쓰면 된다 (기본 표의 홀이 설계값 주석과 함께 들어 있다).
+
+```
+# ID     X          Y        arm1    arm2
+C4      -9.4812    82.3105   5.23   11.57
+D2       -          -        5.19   11.62     # arm만 쟀을 때
+B3     -18.9771    98.7410   -      -         # fiducial 위치만
+```
+
+**기본은 꺼져 있다.** 켜는 방법은 두 가지다.
+
+```bash
+KSPEC_USE_MEASURED=1 python ...          # 환경변수
+```
+```python
+mtlcal(..., use_measured=True)           # 호출 인자 (환경변수보다 우선)
+```
+
+파일 경로는 `KSPEC_MEASURED_GEOMETRY` 로 바꿀 수 있다. 켰는데 파일이 없으면
+예외가 나고, 표에 없는 홀이 적혀 있으면 경고만 남기고 무시한다. 몇 개가
+교체됐는지는 로그에 남는다.
+
+```
+INFO Measured geometry /경로/Measured_Geometry.txt: 2/103 holes replaced
+```
+
+실측 위치를 적은 fiducial 에는 핀홀 오프셋을 **더하지 않는다** (이중 계산이
+되므로). 위치를 아직 안 잰 fiducial 에만 오프셋이 적용된다.
+
 ### 설정이 여러 개일 때
 
 표의 기본 위치는 패키지 안(`analysis/Fiber_Configuration_config73.txt`)이다.
