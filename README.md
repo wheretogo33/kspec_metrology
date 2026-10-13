@@ -145,6 +145,30 @@ D2       -          -        5.19   11.62     # arm만 쟀을 때
 B3     -18.9771    98.7410   -      -         # fiducial 위치만
 ```
 
+#### positioner arm 길이는 개체별 측정표가 따로 있다
+
+제작된 positioner 전체(1~140번)를 잰 표가 `analysis/Positioner_Arm_Table.txt`
+에 들어 있다 (`final_alpha`, `final_beta` 열을 쓴다. 설계값 대비 alpha 최대
+58 um, beta 최대 79 um 차이). 어느 번호가 어느 홀에 꽂혔는지는 설치가 끝나야
+알 수 있으므로 `analysis/Positioner_Map.txt` 에 따로 적는다
+(`Positioner_Map.txt.template` 복사해서 사용).
+
+```
+# ID   positioner
+C4     17
+C5     42
+D2     -        # 아직 모르는 홀
+```
+
+arm 길이의 우선순위는 뒤로 갈수록 높다.
+
+1. 설계값 `DEFAULT_ARM` / `ARM_OVERRIDES`
+2. **개체 측정표** (`Positioner_Arm_Table` + `Positioner_Map`)
+3. `Measured_Geometry.txt` 의 `arm1`, `arm2` 열 (손으로 적는 최종 보정)
+
+설치 맵이 없거나 그 홀이 `-` 면 설계값을 그대로 쓴다. 두 파일 모두
+`KSPEC_POSITIONER_ARM_TABLE` / `KSPEC_POSITIONER_MAP` 로 경로를 바꿀 수 있다.
+
 **기본은 꺼져 있다.** 켜는 방법은 두 가지다.
 
 ```bash

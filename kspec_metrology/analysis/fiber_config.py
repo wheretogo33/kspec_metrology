@@ -185,6 +185,89 @@ def measured_geometry(path=None):
     return out
 
 
+# positioner 개체별 arm 길이 측정표와, 어느 개체가 어느 홀에 꽂혔는지.
+#
+# 제작된 positioner 전체를 번호별로 잰 표가 Positioner_Arm_Table.txt 다
+# (final_alpha, final_beta 열을 쓴다). 어느 번호가 어느 홀에 들어갔는지는
+# 설치가 끝나야 알 수 있으므로 Positioner_Map.txt 에 따로 적는다.
+#
+#   # ID   positioner
+#   C4     17
+#   C5     42
+#
+# 맵이 없거나 홀이 적혀 있지 않으면 그 positioner는 설계값을 쓴다.
+# 둘 다 use_measured 스위치 아래에서만 쓰인다.
+POSITIONER_ARM_TABLE_ENV = 'KSPEC_POSITIONER_ARM_TABLE'
+POSITIONER_MAP_ENV = 'KSPEC_POSITIONER_MAP'
+POSITIONER_ARM_TABLE_PATH = (os.environ.get(POSITIONER_ARM_TABLE_ENV)
+                             or str(Path(__file__).with_name('Positioner_Arm_Table.txt')))
+POSITIONER_MAP_PATH = (os.environ.get(POSITIONER_MAP_ENV)
+                       or str(Path(__file__).with_name('Positioner_Map.txt')))
+
+
+def positioner_arms(path=None):
+    """positioner 번호 -> (arm1, arm2). final_alpha / final_beta 열을 쓴다.
+
+    result 가 OK 가 아닌 행은 건너뛴다. 파일이 없으면 빈 dict.
+    """
+    path = path or POSITIONER_ARM_TABLE_PATH
+    if not os.path.exists(path):
+        return {}
+
+    out = {}
+    with open(path) as ff:
+        for nline, line in enumerate(ff, 1):
+            line = line.split('#')[0].strip()
+            if not line:
+                continue
+            p = line.split()
+            if len(p) < 7:
+                raise ValueError(f"{path}:{nline}: 열이 모자란다: {line!r}")
+            if len(p) >= 8 and p[7].upper() != 'OK':
+                continue
+            try:
+                out[int(p[0])] = (float(p[5]), float(p[6]))   # final_alpha/beta
+            except ValueError:
+                raise ValueError(
+                    f"{path}:{nline}: 숫자로 읽을 수 없다: {line!r}") from None
+
+    return out
+
+
+def positioner_map(path=None):
+    """홀 ID -> positioner 번호. 'ID 번호' 두 칸, '#' 주석, '-' 는 건너뛴다."""
+    path = path or POSITIONER_MAP_PATH
+    if not os.path.exists(path):
+        return {}
+
+    out = {}
+    with open(path) as ff:
+        for nline, line in enumerate(ff, 1):
+            line = line.split('#')[0].strip()
+            if not line:
+                continue
+            p = line.split()
+            if len(p) != 2:
+                raise ValueError(
+                    f"{path}:{nline}: 'ID 번호' 두 칸이어야 한다: {line!r}")
+            if p[1] == '-':
+                continue
+            if p[0] in out:
+                raise ValueError(f"{path}:{nline}: {p[0]} 가 중복이다")
+            try:
+                out[p[0]] = int(p[1])
+            except ValueError:
+                raise ValueError(
+                    f"{path}:{nline}: positioner 번호가 정수가 아니다: "
+                    f"{p[1]!r}") from None
+
+    dup = [v for v in set(out.values()) if list(out.values()).count(v) > 1]
+    if dup:
+        raise ValueError(f"{path}: 같은 positioner가 여러 홀에 적혀 있다: {dup}")
+
+    return out
+
+
 def _use_measured(flag):
     """None이면 모듈 기본값(USE_MEASURED)을 쓴다."""
     return USE_MEASURED if flag is None else bool(flag)
@@ -249,13 +332,26 @@ def fiber_ids():
 def arm_lengths(use_measured=None):
     """FIBERS 순서 그대로의 (arm1, arm2) 배열.
 
-    use_measured 면 실측 파일에 있는 값으로 바꾼다 (measured_geometry 참고).
-    안 잰 positioner는 설계값을 그대로 쓴다.
+    use_measured 면 실측값으로 바꾼다. 우선순위는 뒤로 갈수록 높다.
+
+        1. 설계값 (DEFAULT_ARM / ARM_OVERRIDES)
+        2. positioner 개체 측정표 (Positioner_Arm_Table + Positioner_Map)
+        3. Measured_Geometry 의 arm 열 (손으로 적는 최종 보정)
+
+    해당하는 값이 없는 positioner는 그 전 단계 값을 그대로 쓴다.
     """
     a1 = np.array([row[1] for row in FIBERS], dtype=float)
     a2 = np.array([row[2] for row in FIBERS], dtype=float)
 
     if _use_measured(use_measured):
+        # 1) positioner 개체 측정표 (설치 맵이 있어야 쓸 수 있다)
+        arms, pmap = positioner_arms(), positioner_map()
+        for k, hole in enumerate(fiber_ids()):
+            sn = pmap.get(hole)
+            if sn is not None and sn in arms:
+                a1[k], a2[k] = arms[sn]
+
+        # 2) Measured_Geometry 의 arm 값이 있으면 그쪽이 우선 (손으로 적는 값)
         meas = measured_geometry()
         for k, hole in enumerate(fiber_ids()):
             m = meas.get(hole)
