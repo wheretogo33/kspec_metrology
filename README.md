@@ -379,14 +379,18 @@ mtlcal(..., finder='sep', finder_opts={'minarea': 5})
 
 | `background` | 시간 | 하는 일 |
 |---|---|---|
-| `None` (기본) | — | 빼지 않는다 |
+| `'crop'` (기본) | — | centroid를 잴 때 창마다 sigma clipped median을 빼고 음수는 0으로. `background_opts={'sigma': 5.0}` |
 | `'scalar'` | 0.9 s | 전체에서 sigma clipped median 하나를 뺀다 |
 | `'sep'` | 0.6 s | 위치에 따라 변하는 배경을 뺀다 |
 | `'background2d'` | 6 s | 같은 일을 photutils로 |
-| `'crop'` | — | centroid를 잴 때 창마다 뺀다. `background_opts={'sigma': 5.0}` |
+| `None` | — | 빼지 않는다 |
 
-배경이 평평하면 `'scalar'` 나 `'crop'` 으로 충분하고, 기울기나 얼룩이 있으면
-`'sep'` / `'background2d'` 를 쓴다. `threshold` 는 배경을 뺀 뒤 기준이다.
+기본 `'crop'` 은 창(2 × nwindow) 안의 화소로 배경을 재므로 기울어진 배경에도
+맞고, spot 은 sigma clipping 에 걸려 배경 추정에서 빠진다. 창에 비해 spot 이
+크면(꼬리가 창을 채우면) 배경이 높게 잡히므로 그때는 `'sep'` 처럼 이미지
+전체에서 빼는 방법을 쓴다. 전체에서 빼는 방법에서는 `threshold` 가 배경을 뺀
+뒤 기준이고, `'crop'` 에서는 peak 검출이 원본 이미지에서 되므로 배경을 포함한
+값 기준이다.
 
 ### peak 측정 창
 

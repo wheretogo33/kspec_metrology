@@ -104,7 +104,7 @@ class MetrologyRun:
         finder      : peak 검출 방법. 'find_peaks'(기본), 'daofind', 'sep',
                       'segmentation' (peakfind 참고)
         finder_opts : 방법별 추가 인자 dict
-        background  : 배경 제거. 'scalar' | 'background2d' | 'sep' | 'crop'
+        background  : 배경 제거. 'crop'(기본, 창마다 뺌) | 'scalar' | 'background2d' | 'sep' | None
         background_opts : 배경 추정 인자 dict
         exptime, gain, offset, readmode, usb_traffic : 카메라 설정
         fid_exptime : fiducial 전용 노출시간. None(기본)이면 fiber 와 같은 이미지에서
@@ -139,7 +139,7 @@ class MetrologyRun:
                  , use_measured=None
                  , finder='sep'
                  , finder_opts=None
-                 , background=None
+                 , background='crop'
                  , background_opts=None
                  , exptime=0.1
                  , gain=10

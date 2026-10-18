@@ -24,7 +24,7 @@ def findpeak(npeaks
             , max_shift=None
             , finder='sep'
             , finder_opts=None
-            , background=None
+            , background='crop'
             , background_opts=None
             , sat_level=65000.
             , ReturnFiberImage=False
@@ -45,10 +45,12 @@ def findpeak(npeaks
     finder_opts : 방법별 추가 인자 dict. 예) {'minarea': 8} (sep),
         {'fwhm': 8.0} (daofind), {'npixels': 5} (segmentation).
         'find_peaks'는 box_size를 boxsize 인자에서 받는다.
-    background : 'scalar' | 'background2d' | 'sep' 이면 peak을 찾기 전에
-        이미지 전체에서 배경을 뺀다. 'crop'이면 빼지 않고 centroid를 잴 때
-        잘라낸 창마다 sigma clipping으로 구한 median을 빼고 음수를 0으로
-        자른다. None이면 아무것도 하지 않는다.
+    background : 'crop'(기본) 이면 peak 을 찾을 때는 배경을 빼지 않고, centroid
+        를 잴 때 잘라낸 창마다 sigma clipping 으로 구한 median 을 빼고 음수를
+        0 으로 자른다 (창 안에서 spot 은 clip 되어 빠지고 배경만 남는다). 창마다
+        따로 재므로 기울어진 배경에도 맞는다. 'scalar' | 'background2d' | 'sep'
+        이면 peak 을 찾기 전에 이미지 전체에서 배경을 뺀다 (그때는 threshold 가
+        뺀 뒤 기준이 된다). None 이면 아무것도 하지 않는다.
     background_opts : 배경 추정에 넘길 인자 dict. 'crop'은 sigma만 받는다
         (기본 5.0).
     threshold : 검출 문턱값 [ADU]. background를 뺐으면 뺀 뒤 기준이다.
