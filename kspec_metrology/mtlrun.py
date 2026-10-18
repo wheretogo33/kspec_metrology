@@ -3,8 +3,9 @@
 metrology 한 바퀴(trial)는
 
     1. 카메라로 nexposure장 촬영              (mtlexp)
+       (fiducial 을 다른 노출시간으로 따로 찍으면 fid_exptime 세트만큼 더 찍는다)
     2. 이미지에서 fiber 위치를 재고 각도 계산   (mtlcal)
-    3. 각도 json 저장
+    3. 각도 json 과 fiber 이동량 표 저장
 
 이고, 외부 컴퓨터는 그 json으로 positioner를 옮긴 뒤 다음 trial을 부른다. 실제로
 fiber를 옮기는 일은 이 패키지 밖의 일이므로, 여기서는 trial 하나를 온전히 돌리고
@@ -50,6 +51,7 @@ class TrialResult:
     """trial 한 번의 결과."""
     itrial: int
     json: str               # positioner를 옮길 누적 각도 json 경로
+    offsets: str            # fiber 별 남은 오차와 이번 회전량 표 (ID, dx, dy, dalpha, dbeta)
     err_max: float          # fiber 위치 오차 최대값 [um]
     err_median: float       # fiber 위치 오차 중앙값 [um]
     converged: bool         # 이 trial에서 허용 오차 안에 들어왔는가
@@ -94,7 +96,7 @@ class MetrologyRun:
         nwindow     : center of mass를 잴 crop 반폭 [pixel]. fiber 사이 최소
                       이격 거리에 맞춰야 한다 (mtlcal 참고)
         use_measured : 설계 좌표와 arm 길이를 실측값으로 바꿀지. None이면
-                      fiber_config.USE_MEASURED (기본 False)
+                      fiber_config.USE_MEASURED (기본 True; KSPEC_USE_MEASURED=0 으로 끈다)
         apply_pinhole_offset : fiducial 기준 좌표에 핀홀 오프셋을 더할지.
                       기본 False. 쓰는 plate에서 측정한 핀홀 파일을 넣은 뒤
                       True로 켠다 (load_configuration 참고)
@@ -105,6 +107,19 @@ class MetrologyRun:
         background  : 배경 제거. 'scalar' | 'background2d' | 'sep' | 'crop'
         background_opts : 배경 추정 인자 dict
         exptime, gain, offset, readmode, usb_traffic : 카메라 설정
+        fid_exptime : fiducial 전용 노출시간. None(기본)이면 fiber 와 같은 이미지에서
+                      fiducial 도 찾는다. 숫자 하나면 그 노출로 fiducial 세트를 한 번
+                      더 찍고 (case 1: fiber t2, fiducial t1), 리스트면 세트를 여러 번
+                      찍어 fiducial 마다 포화되지 않은 가장 밝은 것을 쓴다
+                      (case 2: fiber t2, fiducial t1_1, t1_2). 두 노출 사이에 아무것도
+                      움직이지 않아야 한다 (mtlcal 참고)
+        fid_nexposure : fiducial 세트당 장수. None 이면 nexposure
+        model       : 왜곡 다항식에서 풀 항 ('full', 'optics', 'radial', 'similarity';
+                      utils.DISTORTION_MODELS). 실험실의 단순한 광학계는 'radial'
+        magnification : camera -> focal 배율 초기값 (부호 포함). 본 장비와 다른
+                      광학계(실험실)에서는 꼭 준다 (utils.CAMERA2FOCAL_M 참고)
+        sat_level   : 포화 판정 수준 [ADU]
+        fid_min_peak : fiducial 노출을 고를 때 이보다 어두운 검출은 피한다 [ADU]
         tile        : 파일 이름에 쓸 타일 이름. None이면 target 파일에서 읽는다
     """
 
@@ -131,6 +146,12 @@ class MetrologyRun:
                  , offset=30
                  , readmode=1
                  , usb_traffic=40
+                 , fid_exptime=None
+                 , fid_nexposure=None
+                 , model='full'
+                 , magnification=None
+                 , sat_level=65000.
+                 , fid_min_peak=0.
                  , tile=None):
 
         if metric not in ('max', 'median'):
@@ -165,6 +186,17 @@ class MetrologyRun:
 
         self.camera = dict(exptime=exptime, gain=gain, offset=offset,
                            readmode=readmode, usb_traffic=usb_traffic)
+        if fid_exptime is None:
+            self.fid_exptimes = []
+        elif np.isscalar(fid_exptime):
+            self.fid_exptimes = [float(fid_exptime)]
+        else:
+            self.fid_exptimes = [float(t) for t in fid_exptime]
+        self.fid_nexposure = nexposure if fid_nexposure is None else int(fid_nexposure)
+        self.model = model
+        self.magnification = magnification
+        self.sat_level = sat_level
+        self.fid_min_peak = fid_min_peak
 
         self.nfib = len(cfg.fiber_ids())
 
@@ -176,8 +208,20 @@ class MetrologyRun:
         """이 trial 이미지의 head. mtlexp와 mtlcal에 같은 값이 들어간다."""
         return naming.image_head(self.tile, itrial)
 
+    def fid_image_heads(self, itrial):
+        """fiducial 전용 노출 세트들의 head (없으면 빈 리스트)."""
+        return [naming.fid_image_head(self.tile, itrial, k)
+                for k in range(len(self.fid_exptimes))]
+
     def image_paths(self, itrial):
-        return naming.image_paths(self.data_dir, self.tile, itrial, self.nexposure)
+        paths = naming.image_paths(self.data_dir, self.tile, itrial, self.nexposure)
+        for k in range(len(self.fid_exptimes)):
+            paths += naming.fid_image_paths(self.data_dir, self.tile, itrial, k,
+                                            self.fid_nexposure)
+        return paths
+
+    def offset_path(self, itrial):
+        return naming.offset_path(self.json_dir, self.tile, itrial)
 
     def json_path(self, itrial):
         return json_path(self.json_dir, self.tile, itrial)
@@ -211,13 +255,22 @@ class MetrologyRun:
         return self.json_path(0)
 
     def expose(self, itrial):
-        """이 trial의 이미지를 찍는다."""
-        return mtlexp(data_dir=self.data_dir
-                      , head=self.image_head(itrial)
-                      , nexposure=self.nexposure
-                      , extra_header={'TILE': (self.tile, 'metrology tile'),
-                                      'MTLTRIAL': (itrial, 'metrology trial number')}
-                      , **self.camera)
+        """이 trial의 이미지를 찍는다. fiber 노출 뒤에 fiducial 전용 세트를 이어 찍는다."""
+        header = {'TILE': (self.tile, 'metrology tile'),
+                  'MTLTRIAL': (itrial, 'metrology trial number')}
+        paths = mtlexp(data_dir=self.data_dir
+                       , head=self.image_head(itrial)
+                       , nexposure=self.nexposure
+                       , extra_header=header
+                       , **self.camera)
+        for k, (head, texp) in enumerate(zip(self.fid_image_heads(itrial), self.fid_exptimes)):
+            cam = dict(self.camera, exptime=texp)
+            paths += mtlexp(data_dir=self.data_dir
+                            , head=head
+                            , nexposure=self.fid_nexposure
+                            , extra_header=dict(header, FIDSET=(k, 'fiducial exposure set'))
+                            , **cam)
+        return paths
 
     def analyze(self, itrial):
         """이 trial 이미지를 읽어 위치 오차와 각도를 구하고 json에 저장한다."""
@@ -234,6 +287,12 @@ class MetrologyRun:
                       , background=self.background
                       , background_opts=self.background_opts
                       , nexposure=self.nexposure
+                      , fid_head=self.fid_image_heads(itrial) or None
+                      , fid_nexposure=self.fid_nexposure
+                      , model=self.model
+                      , magnification=self.magnification
+                      , sat_level=self.sat_level
+                      , fid_min_peak=self.fid_min_peak
                       , target_file=self.target_file
                       , json_dir=self.json_dir
                       , target_name=self.tile
@@ -262,6 +321,7 @@ class MetrologyRun:
 
         result = TrialResult(itrial=itrial
                              , json=self.json_path(itrial)
+                             , offsets=self.offset_path(itrial)
                              , err_max=err_max
                              , err_median=err_median
                              , converged=err <= self.tolerance

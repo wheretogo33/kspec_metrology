@@ -26,10 +26,19 @@ def findpeak(npeaks
             , finder_opts=None
             , background=None
             , background_opts=None
+            , sat_level=65000.
             , ReturnFiberImage=False
-            , ReturnSpotSize=False):
+            , ReturnSpotSize=False
+            , ReturnNsat=False):
 
     """이미지에서 fiber peak을 찾아 중심 위치를 잰다.
+
+    npeaks : 찾을 spot 개수. 정수면 정확히 그 개수가 되도록 문턱값을 맞추고,
+        (nmin, nmax) 면 그 범위 안이면 받아들인다. fiducial 전용 노출처럼 fiber 가
+        보일 수도 안 보일 수도 있는 이미지에서 쓴다 (예: (nfid, nfid+nfib)).
+        nmax 를 넘으면 어두운 것부터 버리고, nmin 에 못 미치면 예외를 낸다.
+    sat_level : 포화 수준 [ADU, 배경 빼기 전]. ReturnNsat 때 창 안의 포화 화소 수를
+        센다 (fiducial 노출을 고를 때 쓴다).
 
     finder : peak을 찾는 방법. 'sep'(기본), 'find_peaks', 'daofind',
         'segmentation'. 어느 것을 쓰든 뒤 단계는 같다 (peakfind 참고).
@@ -54,16 +63,26 @@ def findpeak(npeaks
     """
     log = get_logger()
 
-    xchip = np.linspace(-5879.5, 5879.5, 11760)*3.76e-3
-    ychip = np.linspace(-4420.5, 4420.5, 8842)*3.76e-3
-    
     #---Stack "nframe" Image----------------------------------------------------------------------------------------------------------
-    im = np.zeros((8842, 11760))
+    im = None
     for iframe in range(nexposure):
         # mtlexp가 저장한 경로와 같은 규칙으로 읽는다
-        im += fits.getdata(image_path(data_dir, head, iframe)).astype(np.float64)[::-1,:] / nexposure
+        frame = fits.getdata(image_path(data_dir, head, iframe)).astype(np.float64)[::-1,:] / nexposure
+        im = frame if im is None else im + frame
 
     ny, nx = im.shape
+
+    # 픽셀 -> 칩 좌표 [mm]. 칩 중심이 원점, 화소 3.76 um. (8842 x 11760 이면 예전 상수와 같다)
+    xchip = (np.arange(nx) - (nx-1)/2.)*3.76e-3
+    ychip = (np.arange(ny) - (ny-1)/2.)*3.76e-3
+
+    # 포화 판정은 배경을 빼기 전 값 기준이므로, 뺄 배경 수준을 대략 기억해 둔다
+    raw_level = float(np.median(im[::16, ::16]))
+
+    if isinstance(npeaks, (tuple, list)):
+        nmin, nmax = int(npeaks[0]), int(npeaks[1])
+    else:
+        nmin = nmax = int(npeaks)
 
     #---Background--------------------------------------------------------------
     # 'crop'은 여기서 빼지 않고 centroid 단계에서 조각마다 뺀다.
@@ -80,7 +99,7 @@ def findpeak(npeaks
     if finder == 'find_peaks':
         fopts.setdefault('box_size', boxsize)
     if mode == "Raw":
-        # 검출 개수가 정확히 npeaks가 되는 문턱값을 찾는다.
+        # 검출 개수가 npeaks (또는 nmin..nmax 범위) 가 되는 문턱값을 찾는다.
         #
         # 문턱을 올리면 검출이 줄고 내리면 늘어난다. 한 번이라도 양쪽을 다 봤으면
         # 그 사이를 이분법으로 좁히고, 아직 한쪽만 봤으면 10%씩 옮긴다. 개수가
@@ -88,33 +107,37 @@ def findpeak(npeaks
         # (cosmic ray, hot pixel, 어두운 fiber 하나 등) niter_max에서 끊고
         # 가장 가까웠던 시도로 넘어간다. 옛 구현은 상한이 없어서 이 경우
         # 무한 루프였다.
+        def miss(n):
+            return 0 if nmin <= n <= nmax else (nmin-n if n < nmin else n-nmax)
+
         threshold_temp = threshold
         t_many = None       # 너무 많이 나온 문턱 (더 올려야 한다)
         t_few = None        # 너무 적게 나온 문턱 (더 내려야 한다)
-        best = None         # (|개수차|, peak_table, 문턱)
+        best = None         # (범위에서 벗어난 개수, peak_table, 문턱)
 
         for niter in range(1, niter_max+1):
             peak_table_raw = peakfind.find(im, threshold_temp,
                                            method=finder, options=fopts)
             peak_table = dedupe_peaks_kdtree(peak_table_raw, min_dist=40)
             nfound = len(peak_table)
-            log.info("Iteration %d: threshold %.4g -> %d peaks (target %d)",
-                     niter, threshold_temp, nfound, npeaks)
+            log.info("Iteration %d: threshold %.4g -> %d peaks (target %s)",
+                     niter, threshold_temp, nfound,
+                     nmin if nmin == nmax else f"{nmin}..{nmax}")
 
-            if best is None or abs(nfound-npeaks) < best[0]:
-                best = (abs(nfound-npeaks), peak_table, threshold_temp)
+            if best is None or miss(nfound) < best[0]:
+                best = (miss(nfound), peak_table, threshold_temp)
 
-            if nfound == npeaks:
+            if miss(nfound) == 0:
                 break
 
-            if nfound > npeaks:
+            if nfound > nmax:
                 t_many = threshold_temp
             else:
                 t_few = threshold_temp
 
             if t_many is not None and t_few is not None:
                 threshold_temp = 0.5*(t_many + t_few)       # 양쪽을 봤으니 이분법
-            elif nfound > npeaks:
+            elif nfound > nmax:
                 threshold_temp *= 1.1
             else:
                 threshold_temp *= 0.9
@@ -122,26 +145,29 @@ def findpeak(npeaks
             # 상한까지 못 맞췄다. 가장 가까웠던 시도를 쓴다.
             _, peak_table, threshold_temp = best
             nfound = len(peak_table)
-            log.warning("Could not reach %d peaks in %d iterations; "
+            log.warning("Could not reach %s peaks in %d iterations; "
                         "using the closest attempt (%d peaks at threshold %.4g)",
-                        npeaks, niter_max, nfound, threshold_temp)
+                        nmin if nmin == nmax else f"{nmin}..{nmax}", niter_max,
+                        nfound, threshold_temp)
 
-            if nfound < npeaks:
+            if nfound < nmin:
                 raise RuntimeError(
-                    f"Only {nfound} peaks found but {npeaks} expected. "
+                    f"Only {nfound} peaks found but {nmin} expected. "
                     "Lower `threshold`, or check the image and the fiber "
                     "configuration (fiber_config.FIBERS).")
 
             # 남는 것은 가장 어두운 쪽부터 버린다 (cosmic ray / hot pixel로 본다)
             order = np.argsort(-np.asarray(peak_table['peak_value'], dtype=float))
-            peak_table = peak_table[order[:npeaks]]
+            peak_table = peak_table[order[:nmax]]
             log.warning("Dropped %d faintest detections to match %d",
-                        nfound-npeaks, npeaks)
+                        nfound-nmax, nmax)
 
         xf, yf = peak_table['x_peak'].data, peak_table['y_peak'].data
+        npeaks = xf.size
         log.info("Found %d peaks at threshold %.4g", xf.size, threshold_temp)
 
     elif mode=="Predict":
+        npeaks = int(np.size(x))
         coeff_temp = np.copy(focal2camera_coeff_comm)
         xpredict, ypredict = transform(x, y, coeff_temp)
 
@@ -217,6 +243,7 @@ def findpeak(npeaks
 
     xobs = np.zeros(npeaks)
     yobs = np.zeros(npeaks)
+    nsat = np.zeros(npeaks, dtype=int)
 
     if ReturnSpotSize:
         xsigma, ysigma = np.zeros(npeaks), np.zeros(npeaks)
@@ -246,6 +273,10 @@ def findpeak(npeaks
 
         xobs[ifiber], yobs[ifiber] = xc, yc
         shifts[ifiber] = np.hypot(i0-icen[ifiber], j0-jcen[ifiber])
+        # 포화 화소 수: 배경을 뺀 이미지라면 뺀 만큼을 되돌려 센다 (배경은 포화에 비해 작다)
+        raw_crop = im[j0-nwindow:j0+nwindow, i0-nwindow:i0+nwindow]
+        nsat[ifiber] = int(np.count_nonzero(
+            raw_crop >= sat_level - (raw_level if (background and not crop_background) else 0.)))
 
         # spot size는 background 제거를 거친 im_crop의 중앙 절반 window에서 측정
         if ReturnSpotSize:
@@ -274,11 +305,14 @@ def findpeak(npeaks
     #         ReturnSpotSize   -> 끝에 xsigma, ysigma 추가 [mm].
     #                             FWHM이 아니라 2차 모멘트(sigma)다.
     #                             픽셀로 보려면 3.76e-3으로 나눈다.
+    #         ReturnNsat       -> 맨 끝에 창마다 센 포화 화소 수 추가
     out = [im]
     if ReturnFiberImage:
         out.append(im_crop_full)
     out += [xobs, yobs, peak_value]
     if ReturnSpotSize:
         out += [xsigma, ysigma]
+    if ReturnNsat:
+        out.append(nsat)
 
     return tuple(out)

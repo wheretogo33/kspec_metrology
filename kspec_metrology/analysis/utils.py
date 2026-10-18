@@ -85,6 +85,45 @@ focal2camera_coeff = np.array([-1.18e-1, 0., 0., 0.
 # camera2focal_coeff_comm[0]은 -8.86122935).
 CAMERA2FOCAL_M = -8.467529447775467
 
+# 왜곡 다항식 계수 이름 (_transform_core 인자 순서). fitdistortion 이 어느 항을 풀지
+# 고를 때 쓴다.
+COEFF_NAMES = ('m', 'theta', 'x0', 'y0',
+               'r1', 'r2', 'r3', 'r4',          # radial   r^2 .. r^8
+               't1', 't2', 't3',                # tangential
+               'a1', 'a2', 'a4', 'a3')          # PSF 비대칭(coma)으로 생기는 centroid 이동 항
+
+# 왜곡 모델. 광학계가 단순하거나 fiducial 이 적을 때 풀 항을 줄인다.
+# 풀지 않는 항은 0 으로 고정되고, 쓰려면 fiducial 이 (항 수 / 2) 개 이상 있어야 한다.
+#   full        본 장비. radial 4 + tangential 3 + PSF 4 항 (15 개, fiducial 8 개 이상)
+#   optics      PSF 항 없이 광학 왜곡만 (11 개). PSF 가 대칭에 가까울 때
+#   radial      배율 · 회전 · offset + r^2, r^4 (6 개). 렌즈가 적은 실험실 광학계
+#   similarity  배율 · 회전 · offset 만 (4 개). 왜곡을 무시해도 될 때
+DISTORTION_MODELS = {
+    'full': COEFF_NAMES,
+    'optics': COEFF_NAMES[:11],
+    'radial': ('m', 'theta', 'x0', 'y0', 'r1', 'r2'),
+    'similarity': ('m', 'theta', 'x0', 'y0'),
+}
+
+
+def model_mask(model):
+    """모델 이름(또는 계수 이름 목록) -> 풀 계수를 True 로 한 길이 15 의 bool 배열."""
+    if isinstance(model, str):
+        if model not in DISTORTION_MODELS:
+            raise ValueError(f"unknown distortion model {model!r}; "
+                             f"choose from {list(DISTORTION_MODELS)} or give coefficient names")
+        names = DISTORTION_MODELS[model]
+    else:
+        names = tuple(model)
+    bad = [n for n in names if n not in COEFF_NAMES]
+    if bad:
+        raise ValueError(f"unknown coefficient name(s) {bad}; valid: {COEFF_NAMES}")
+    for n in ('m', 'theta', 'x0', 'y0'):
+        if n not in names:
+            raise ValueError(f"'{n}' must always be free (it is a pose term, not distortion)")
+    return np.array([n in names for n in COEFF_NAMES])
+
+
 camera2focal_coeff = np.array([CAMERA2FOCAL_M, 3.39, -17.6, 6.12
                             , 1e-7 , 1e-10,  -1e-14, 1e-19
                             , 1e-5 , -1e-5, -1e-5 

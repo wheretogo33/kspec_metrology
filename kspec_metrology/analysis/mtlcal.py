@@ -3,11 +3,12 @@ import os
 
 import numpy as np
 from astropy.io import ascii
+from scipy.spatial import cKDTree
 
 from kspec_metrology.analysis.findpeak import findpeak
 from kspec_metrology.analysis.matchfiber import matchfiber
 from kspec_metrology.analysis.fitdistortion import fitdistortion
-from kspec_metrology.analysis.utils import find_angle_double_method2_select_elbow
+from kspec_metrology.analysis.utils import find_angle_double_method2_select_elbow, transform
 from kspec_metrology.analysis.zenith_offset import zenith_offset
 from kspec_metrology.analysis.target_info import read_target, zenith_angle
 from kspec_metrology.analysis import fiber_config as cfg
@@ -38,8 +39,11 @@ def load_configuration(target_file=None, apply_zenith_offset=True,
 
     use_measured 면 설계 좌표와 arm 길이를 실측값으로 바꾼다
     (fiber_config.measured_geometry). None이면 fiber_config.USE_MEASURED를
-    따르고 그 기본값은 False다. 실측 위치가 있는 fiducial에는 핀홀 오프셋을
-    더하지 않는다 (이중 계산이 되므로).
+    따르고 그 기본값은 True다 (KSPEC_USE_MEASURED=0 으로 끈다). 실측 위치가
+    있는 fiducial에는 핀홀 오프셋을 더하지 않는다 (이중 계산이 되므로).
+    실측 파일이 없으면, 인자로 명시해 켠 경우에만 예외를 내고 아니면 경고만
+    남기고 설계값을 쓴다. 실측 좌표가 설계 좌표에서 MEASURED_MAX_DEV 보다 멀면
+    다른 plate 의 파일로 보고 멈춘다.
 
     기본값이 False인 이유: 핀홀 측정값은 plate마다 다시 재야 하는데, 표를 바꿔도
     fiducial ID가 상당수 겹치는 탓에 옛 plate의 값이 조용히 적용될 수 있다.
@@ -77,15 +81,25 @@ def load_configuration(target_file=None, apply_zenith_offset=True,
     if cfg._use_measured(use_measured):
         measured = cfg.measured_geometry()
         if not measured:
-            raise FileNotFoundError(
-                "use_measured가 켜져 있는데 실측 기하 파일이 없습니다: "
-                f"{cfg.MEASURED_GEOMETRY_PATH}")
+            msg = ("use_measured가 켜져 있는데 실측 기하 파일이 없습니다: "
+                   f"{cfg.MEASURED_GEOMETRY_PATH}")
+            if use_measured:                     # 인자로 명시해 켠 경우만 멈춘다
+                raise FileNotFoundError(msg)
+            log.warning("%s -- 설계값을 씁니다", msg)
 
         nhit = 0
         for k, hole in enumerate(pick_ids):
             m = measured.get(hole)
             if m is None or m['x'] is None or m['y'] is None:
                 continue
+            dev = float(np.hypot(m['x']-xorigin[k], m['y']-yorigin[k]))
+            if dev > cfg.MEASURED_MAX_DEV:
+                raise ValueError(
+                    f"실측 기하 {cfg.MEASURED_GEOMETRY_PATH}: {hole} 의 실측 좌표가 "
+                    f"설계 좌표에서 {dev:.2f} mm 떨어져 있습니다 (한계 "
+                    f"{cfg.MEASURED_MAX_DEV} mm). 다른 plate 의 실측 파일이거나 "
+                    f"표({cfg.FIBER_TABLE_PATH})가 다릅니다. 맞는 파일로 바꾸거나 "
+                    "KSPEC_USE_MEASURED=0 (use_measured=False) 로 끄십시오.")
             xorigin[k], yorigin[k] = m['x'], m['y']
             nhit += 1
 
@@ -264,6 +278,107 @@ def save_initial_angles(json_dir, target_name, target_file=None,
     return angles
 
 
+def save_offsets(json_dir, target_name, itrial, dx, dy, angle_rot, nfib):
+    """fiber 마다 남은 위치 오차와 이번 trial 회전량을 표로 저장한다.
+
+    positioner 를 옮기는 쪽이 json(누적 각도) 대신 "얼마나 더 가야 하는지" 를
+    바로 보고 싶을 때 쓴다. 열: ID, dx, dy [um] (측정 - 목표), dalpha, dbeta [deg]
+    (이번 trial 회전량, json 과 같은 부호 규약).
+    """
+    os.makedirs(json_dir, exist_ok=True)
+    path = naming.offset_path(json_dir, target_name, itrial)
+    with open(path, 'w') as ff:
+        ff.write("# fiber position error (measured - target) and this trial's rotation\n")
+        ff.write(f"# {'ID':<6} {'dx[um]':>9} {'dy[um]':>9} {'dalpha[deg]':>12} {'dbeta[deg]':>12}\n")
+        for k, hole in enumerate(cfg.fiber_ids()[:nfib]):
+            ff.write(f"  {hole:<6} {dx[k]*1e3:9.1f} {dy[k]*1e3:9.1f} "
+                     f"{angle_rot[2*k]:12.4f} {angle_rot[2*k+1]:12.4f}\n")
+    return path
+
+
+def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
+                      m_init=None, sat_level=65000., fid_min_peak=0., **pk):
+    """fiducial 전용 노출 세트들에서 fiducial 의 카메라 좌표를 잰다.
+
+    x, y 는 fiber 목표 + fiducial 설계 위치 전체, fid_flag 는 그중 fiducial.
+    세트마다 peak 을 찾고 (fiber 가 보일 수도 있으므로 nfid..nfid+nfib 개 허용)
+    설계 패턴에 매칭한다. fiber 가 보이면 (검출이 fiducial 수보다 많으면) fiber
+    목표까지 넣어 전체 패턴으로 매칭한다 -- fiducial 30개만으로는 그 사이에
+    fiber 가 빽빽이 있을 때 회전각이 정해지지 않는다. 세트가 여럿이면 fiducial
+    마다 포화되지 않은 것 중 가장 밝은 세트를 고르고, 전부 포화면 포화 화소가
+    가장 적은 세트를 쓴다. fid_min_peak 보다 어두운 검출은 (다른 세트가 있으면)
+    피한다.
+
+    반환: xobs, yobs (fiducial 순서), choice (fiducial 마다 고른 세트 번호),
+          theta_guess, (xoff, yoff) (마지막 매칭의 초기값; fitdistortion 용)
+    """
+    log = get_logger()
+    nfid, nfib = int(fid_flag.sum()), int((~fid_flag).sum())
+    sets = []
+    for k, head in enumerate(fid_heads):
+        _, xobs, yobs, peak, nsat = findpeak((nfid, nfid+nfib), data_dir=data_dir, head=head,
+                                             nexposure=nexposure, sat_level=sat_level,
+                                             ReturnNsat=True, **pk)
+        if xobs.size > nfid:
+            # fiber 도 보인다: 전체 패턴으로 매칭하고 fiducial 자리만 쓴다
+            imatch, theta_guess, (xoff, yoff) = matchfiber(x, y, xobs, yobs, m_init=m_init)
+            imatch = imatch[fid_flag]
+        else:
+            imatch, theta_guess, (xoff, yoff) = matchfiber(x[fid_flag], y[fid_flag], xobs, yobs,
+                                                           m_init=m_init)
+        if np.unique(imatch).size != nfid:
+            log.warning("Fiducial set %d (%s): %d of %d fiducials matched to the same peak",
+                        k, head, nfid-np.unique(imatch).size, nfid)
+        sets.append(dict(x=xobs[imatch], y=yobs[imatch], peak=peak[imatch], nsat=nsat[imatch],
+                         theta=theta_guess, off=(xoff, yoff)))
+        log.info("Fiducial set %d (%s): %d peaks, %d fiducials saturated, peak %.0f..%.0f",
+                 k, head, xobs.size, int((nsat[imatch] > 0).sum()),
+                 peak[imatch].min(), peak[imatch].max())
+
+    choice = np.zeros(nfid, dtype=int)
+    for i in range(nfid):
+        ok = [k for k, st in enumerate(sets) if st['nsat'][i] == 0 and st['peak'][i] >= fid_min_peak]
+        if ok:
+            choice[i] = max(ok, key=lambda k: sets[k]['peak'][i])
+        else:
+            choice[i] = min(range(len(sets)), key=lambda k: (sets[k]['nsat'][i], -sets[k]['peak'][i]))
+    xobs = np.array([sets[choice[i]]['x'][i] for i in range(nfid)])
+    yobs = np.array([sets[choice[i]]['y'][i] for i in range(nfid)])
+    bad = [i for i in range(nfid) if sets[choice[i]]['nsat'][i] > 0]
+    if len(sets) > 1:
+        log.info("Fiducial exposure chosen per fiducial: %s",
+                 ", ".join(f"set {k}: {int((choice == k).sum())}" for k in range(len(sets))))
+    if bad:
+        log.warning("%d fiducial(s) saturated in every set: %s", len(bad),
+                    ", ".join(str(i) for i in bad))
+    last = sets[-1]
+    return xobs, yobs, choice, last['theta'], last['off']
+
+
+def measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, max_dist=None, **pk):
+    """fiber 노출에서 peak 을 찾아 (fiducial 로 맞춘) 변환으로 focal 좌표로 옮기고
+    목표 위치에 가장 가까운 것을 그 fiber 로 본다. x, y 는 fiber + fiducial 전체
+    목표 (fiducial 은 그 자리의 검출을 fiber 로 잘못 잡지 않게 하려고 넣는다).
+
+    반환: xfocal, yfocal (x, y 순서), dist (매칭 거리 [mm])
+    """
+    log = get_logger()
+    nfid = x.size - nfib
+    _, xobs, yobs, _ = findpeak((nfib, nfib+nfid), data_dir=data_dir, head=head,
+                                nexposure=nexposure, **pk)
+    xf, yf = transform(xobs, yobs, coeff)
+    dist, j = cKDTree(np.column_stack((xf, yf))).query(np.column_stack((x, y)))
+    if np.unique(j[:nfib]).size != nfib:
+        log.warning("Fiber matching is not unique: %d fibers share a peak",
+                    nfib-np.unique(j[:nfib]).size)
+    if max_dist is not None and (dist[:nfib] > max_dist).any():
+        log.warning("%d fiber(s) matched farther than %.2f mm from the target (max %.2f mm)",
+                    int((dist[:nfib] > max_dist).sum()), max_dist, dist[:nfib].max())
+    log.info("Fiber image (%s): %d peaks; fiber-target distance median %.1f um, max %.1f um",
+             head, xobs.size, np.median(dist[:nfib])*1e3, dist[:nfib].max()*1e3)
+    return xf[j], yf[j], dist
+
+
 def mtlcal(data_dir='./MTL/data/'
            , head='test'
            , mode='Raw'
@@ -277,11 +392,35 @@ def mtlcal(data_dir='./MTL/data/'
            , background=None
            , background_opts=None
            , nexposure=1
+           , fid_head=None
+           , fid_nexposure=None
+           , model='full'
+           , magnification=None
+           , sat_level=65000.
+           , fid_min_peak=0.
            , target_file=None
            , json_dir=None
            , target_name=None
            , itrial=1):
     """이미지에서 fiber 위치를 재고 positioner 보정각을 구한다.
+
+    fid_head 가 None 이면 이미지 한 벌(head)에 fiber 와 fiducial 이 같이 찍혀
+    있다고 보고 한 번에 처리한다 (기본). fiber 와 fiducial 의 밝기 차이가 커서
+    노출을 나눠 찍었으면 fiducial 노출의 head 를 fid_head 에 준다 (하나 또는
+    여러 개의 리스트: fiducial 밝기 차이가 심해 두 노출로 나눠 찍은 경우). 그러면
+
+        1. fiducial 노출(들)에서 fiducial 위치를 재고  (measure_fiducials)
+        2. fiducial 로 camera -> focal 변환을 맞춘 뒤 (fitdistortion)
+        3. fiber 노출(head)의 peak 을 그 변환으로 옮겨 목표에 매칭한다 (measure_fibers)
+
+    두 노출 사이에 카메라와 plate 가 움직이지 않았다고 가정한다.
+
+    model 은 왜곡 다항식에서 풀 항이다 (utils.DISTORTION_MODELS: 'full', 'optics',
+    'radial', 'similarity'). 렌즈가 적은 실험실 광학계에서는 'radial' 처럼 줄인다.
+    magnification 은 camera -> focal 배율 초기값으로, 본 장비와 광학계가 다르면
+    (실험실) 꼭 주어야 fiber 매칭이 된다 (utils.CAMERA2FOCAL_M 참고; 부호 포함).
+    sat_level 은 포화 판정 수준 [ADU], fid_min_peak 은 fiducial 노출을 고를 때 이보다
+    어두운 검출을 피하는 기준이다.
 
     mode는 findpeak에 그대로 넘어간다. "Raw"는 threshold를 조절해 가며 peak을
     찾고, "Predict"는 목표 위치에서 출발해 가장 밝은 픽셀로 정렬한다.
@@ -321,28 +460,48 @@ def mtlcal(data_dir='./MTL/data/'
         target_file, apply_pinhole_offset=apply_pinhole_offset,
         use_measured=use_measured)
 
-    #---관측된 peak 위치--------------------------------------------------------
-    npeaks = x.size
-    _, xobs, yobs, _ = findpeak(npeaks
-                                , data_dir=data_dir
-                                , head=head
-                                , nexposure=nexposure
-                                , threshold=threshold
-                                , nwindow=nwindow
-                                , niter_recenter=niter_recenter
-                                , finder=finder
-                                , finder_opts=finder_opts
-                                , background=background
-                                , background_opts=background_opts
-                                , mode=mode
-                                , x=x, y=y)
+    pk = dict(threshold=threshold, nwindow=nwindow, niter_recenter=niter_recenter,
+              finder=finder, finder_opts=finder_opts, background=background,
+              background_opts=background_opts)
 
-    imatch, theta_guess, (xoff_guess, yoff_guess) = matchfiber(x, y, xobs, yobs)
+    if fid_head is None:
+        #---이미지 한 벌: fiber 와 fiducial 을 같이 찾는다-------------------------
+        npeaks = x.size
+        _, xobs, yobs, _, nsat = findpeak(npeaks, data_dir=data_dir, head=head,
+                                          nexposure=nexposure, mode=mode, x=x, y=y,
+                                          sat_level=sat_level, ReturnNsat=True, **pk)
 
-    xfocal, yfocal, dx, dy, _ = fitdistortion(x, y, fid_flag
-                                              , xobs, yobs
-                                              , imatch, theta_guess
-                                              , xoff_guess, yoff_guess)
+        imatch, theta_guess, (xoff_guess, yoff_guess) = matchfiber(
+            x, y, xobs, yobs, m_init=magnification)
+
+        nsat_fid = int((nsat[imatch][fid_flag] > 0).sum())
+        if nsat_fid:
+            log.warning("%d fiducial(s) saturated; consider a separate fiducial "
+                        "exposure (fid_head / fid_exptime)", nsat_fid)
+
+        xfocal, yfocal, dx, dy, _ = fitdistortion(x, y, fid_flag
+                                                  , xobs, yobs
+                                                  , imatch, theta_guess
+                                                  , xoff_guess, yoff_guess
+                                                  , model=model, m_init=magnification)
+    else:
+        #---노출을 나눠 찍은 경우: fiducial 노출로 변환을 맞추고 fiber 노출에 적용----
+        fid_heads = [fid_head] if isinstance(fid_head, str) else list(fid_head)
+        fid_nexposure = nexposure if fid_nexposure is None else fid_nexposure
+        x_fid, y_fid = x[fid_flag], y[fid_flag]
+
+        xo_fid, yo_fid, _, theta_guess, (xoff_guess, yoff_guess) = measure_fiducials(
+            fid_heads, x, y, fid_flag, data_dir, fid_nexposure,
+            m_init=magnification, sat_level=sat_level, fid_min_peak=fid_min_peak, **pk)
+
+        xf_fid, yf_fid, dxf, dyf, coeff = fitdistortion(
+            x_fid, y_fid, np.ones(x_fid.size, dtype=bool), xo_fid, yo_fid,
+            np.arange(x_fid.size), theta_guess, xoff_guess, yoff_guess,
+            model=model, m_init=magnification)
+
+        xfocal, yfocal, _ = measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, **pk)
+        xfocal[fid_flag], yfocal[fid_flag] = xf_fid, yf_fid     # fiducial 은 전용 노출 값
+        dx, dy = xfocal-x, yfocal-y
 
     #---보정각 계산 (fiber만)---------------------------------------------------
     theta_true, phi_true = _arm_angles(xorigin, yorigin, x, y, use_measured)
@@ -372,6 +531,8 @@ def mtlcal(data_dir='./MTL/data/'
     if json_dir is not None and target_name is not None:
         log.info("Saved angles to %s",
                  save_angles(json_dir, target_name, itrial, angle_cum))
+        log.info("Saved fiber offsets to %s",
+                 save_offsets(json_dir, target_name, itrial, dx, dy, angle_rot, nfib))
 
     dist = np.sqrt(dx[~fid_flag]**2 + dy[~fid_flag]**2)*1e3
     log.info("Fiber position error: max %.1f um, median %.1f um",

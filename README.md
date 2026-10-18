@@ -72,7 +72,16 @@ summary.err_max, summary.err_median    # 마지막 fiber 위치 오차 [um]
 ## 출력 형식
 
 trial마다 `{json_dir}/{tile}_MetrologyTrial_{itrial}.json` 이 생긴다.
-`itrial = 0` 은 관측 전 목표 각도다.
+`itrial = 0` 은 관측 전 목표 각도다. 같은 자리에
+`{tile}_MetrologyTrial_{itrial}_offset.txt` 도 생기는데, fiber 마다 남은 위치
+오차 (측정 − 목표, µm) 와 이번 trial 의 회전량 (deg) 을 적은 표다
+(`res.offsets`). positioner 를 옮기는 쪽이 "얼마나 더 가야 하는지" 를 바로
+보려면 이 파일을 쓰고, 누적 각도는 json 을 쓴다.
+
+```
+# ID       dx[um]    dy[um]  dalpha[deg]   dbeta[deg]
+  C4        -12.3      40.1       0.3121      -0.1180
+```
 
 key는 **`{hole ID}_{arm}`** 이다. `_a` 는 alpha arm, `_b` 는 beta arm이고,
 hole ID는 `Fiber_Configuration` 표의 ID다. 값은 degree이며 부호는
@@ -169,18 +178,28 @@ arm 길이의 우선순위는 뒤로 갈수록 높다.
 설치 맵이 없거나 그 홀이 `-` 면 설계값을 그대로 쓴다. 두 파일 모두
 `KSPEC_POSITIONER_ARM_TABLE` / `KSPEC_POSITIONER_MAP` 로 경로를 바꿀 수 있다.
 
-**기본은 꺼져 있다.** 켜는 방법은 두 가지다.
+**기본은 켜져 있다** (2026-10 부터). 패키지에 든 `Measured_Geometry.txt` 에는
+새 plate(d = 19 mm) 의 fiducial 핀홀 위치 30개가 들어 있다
+(`Fiducial_Pinhole_261017.txt`, plate 영상에서 측정, 1σ 약 20 µm). 끄는 방법은
+두 가지다.
 
 ```bash
-KSPEC_USE_MEASURED=1 python ...          # 환경변수
+KSPEC_USE_MEASURED=0 python ...          # 환경변수
 ```
 ```python
-mtlcal(..., use_measured=True)           # 호출 인자 (환경변수보다 우선)
+mtlcal(..., use_measured=False)          # 호출 인자 (환경변수보다 우선)
 ```
 
-파일 경로는 `KSPEC_MEASURED_GEOMETRY` 로 바꿀 수 있다. 켰는데 파일이 없으면
-예외가 나고, 표에 없는 홀이 적혀 있으면 경고만 남기고 무시한다. 몇 개가
+파일 경로는 `KSPEC_MEASURED_GEOMETRY` 로 바꿀 수 있다. 파일이 없으면 인자로
+명시해 켠 경우(`use_measured=True`)에만 예외가 나고, 기본 상태에서는 경고만
+남기고 설계값을 쓴다. 표에 없는 홀이 적혀 있으면 경고만 남기고 무시한다. 몇 개가
 교체됐는지는 로그에 남는다.
+
+실측 좌표가 설계 좌표에서 1 mm (`fiber_config.MEASURED_MAX_DEV`) 넘게 떨어져
+있으면 **다른 plate 의 파일로 보고 예외를 낸다.** 표를 바꿔도 fiducial ID 가
+상당수 겹쳐서 옛 plate 의 값이 조용히 적용될 수 있기 때문이다. 옛 표
+(`Fiber_Configuration_250415.txt` 등) 로 mock 을 돌릴 때는 이 검사에 걸리므로
+`use_measured=False` (run_mock 은 기본이 꺼져 있다) 로 돌린다.
 
 ```
 INFO Measured geometry /경로/Measured_Geometry.txt: 2/103 holes replaced
@@ -266,13 +285,74 @@ map 파일은 `index  ID` 두 칸이고 `#` 뒤는 주석이다. 핀홀을 옮�
 mtlcal(..., apply_pinhole_offset=True)
 ```
 
+### fiber 와 fiducial 의 노출을 나눠 찍기
+
+fiber 와 fiducial 의 밝기 차이가 커서 한 노출로는 한쪽이 포화되거나 안 보일 때
+쓴다. `fid_exptime` 을 주면 fiber 노출(`exptime`) 뒤에 fiducial 전용 세트를
+이어 찍고, 분석도 둘을 나눠 한다. **두 노출 사이에 카메라와 plate, positioner 가
+움직이지 않았다고 가정한다.**
+
+```python
+# case 1: fiber t2, fiducial t1
+run = MetrologyRun(..., exptime=2.0e-3, fid_exptime=0.5e-3)
+
+# case 2: fiber t2, fiducial 을 두 노출로 (밝기 차이가 심한 fiducial 들)
+run = MetrologyRun(..., exptime=2.0e-3, fid_exptime=[0.5e-3, 2.0e-3])
+```
+
+분석 순서는 `mtlcal(..., fid_head=...)` 에 있다.
+
+1. fiducial 세트마다 peak 을 찾아 설계 패턴에 매칭한다 (fiber 가 보이면
+   fiber 목표까지 넣은 전체 패턴으로; fiducial 수 .. 전체 수 사이의 검출을
+   받아들인다). 세트가 여럿이면 fiducial 마다 **포화되지 않은 것 중 가장 밝은
+   세트** 를 쓰고, 전부 포화면 포화 화소가 가장 적은 세트를 쓴다 (`sat_level`,
+   기본 65000; `fid_min_peak` 보다 어두운 검출은 피한다). 어느 세트를 몇 개
+   썼는지 로그에 남는다.
+2. 그 fiducial 로 camera → focal 변환을 맞춘다.
+3. fiber 노출의 peak 을 그 변환으로 옮겨 목표 위치에 가장 가까운 것을 그 fiber
+   로 본다.
+
+이미지 이름은 fiber 가 `{tile}_MetrologyTrial_{i}_{j}.fits`, fiducial 세트가
+`{tile}_MetrologyTrial_{i}_fid{k}_{j}.fits` 다 (`naming.fid_image_head`).
+이미 찍어 둔 이미지로 계산만 하려면 `mtlcal(..., head=..., fid_head=[...])`
+에 head 를 직접 준다. 한 이미지로 찍은 경우에도 fiducial 이 포화되어 있으면
+경고가 나오므로, 그때 나눠 찍는 것을 고려하면 된다.
+
+### 실험실 광학계에서 쓰기
+
+렌즈가 몇 개 빠진 실험실 광학계에서는 왜곡이 단순하고 PSF 도 대칭에 가깝다.
+두 가지만 바꾸면 같은 과정(촬영 → fiber/fiducial 위치 → 변환 fit → 보정각)
+을 그대로 쓸 수 있다.
+
+| 인자 | 뜻 |
+|---|---|
+| `magnification` | camera → focal 배율 초기값 (부호 포함; 본 장비는 `utils.CAMERA2FOCAL_M` ≈ −8.47). fiber 매칭은 이 값으로 투영해서 하므로 몇 % 안으로 맞아야 한다. 대략 `초점면 거리 / (픽셀 거리 × 3.76e-3)` 로 한 번 재서 넣는다 |
+| `model` | 왜곡 다항식에서 풀 항. `'full'` (15개, 본 장비) / `'optics'` (PSF 항 없이 11개) / `'radial'` (배율·회전·offset + r², r⁴, 6개) / `'similarity'` (배율·회전·offset, 4개). fiducial 이 `항 수 / 2` 개 이상 있어야 한다 |
+
+```python
+run = MetrologyRun(target_file=..., data_dir=..., json_dir=...,
+                   magnification=-5.2, model='radial',
+                   nwindow=30, threshold=1e3,
+                   exptime=2e-3, fid_exptime=0.5e-3)
+```
+
+`nwindow` (무게중심 창 반폭) 와 `threshold` 는 그 광학계의 PSF 크기와 밝기에
+맞춘다 (아래 "peak 측정 창" 참고). 어떤 모델을 썼고 fiducial 잔차가 얼마인지는
+로그에 남는다. 참고로 본 장비 mock 에서는 `optics` 와 `radial` 이 `full` 과
+거의 같은 fiber 오차를 내지만 `similarity` 는 1 mm 가까이 틀린다 — 그 광학계의
+왜곡이 어느 정도인지 fiducial 잔차로 확인하고 모델을 고른다.
+
+```
+INFO Distortion fit (radial, 6 coefficients, 30 fiducials): fiducial residual rms 10.8 um, max 20.2 um; magnification -8.4915
+```
+
 ### 카메라 배율
 
 `analysis/utils.py` 의 `CAMERA2FOCAL_M` 이 camera -> focal 배율 초기값이다.
 `matchfiber` 는 회전과 offset만 훑고 배율은 맞추지 않으므로, 이 값이 실제와
 몇 % 이상 어긋나면 시야 가장자리에서 fiber 매칭이 어긋난다. 지금은 mock
 이미지(Zemax 설계 광학계) 기준인 `-8.4675` 로 맞춰져 있으니, 실카메라 배율이
-확정되면 이 상수를 바꿔야 한다.
+확정되면 이 상수를 바꾸거나 `magnification` 인자로 넘긴다.
 
 ### peak 검출 방법
 

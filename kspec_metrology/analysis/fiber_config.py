@@ -128,9 +128,10 @@ def pinhole_offsets(map_path=None, loc_path=None):
 #   C4      -9.5123    82.2810   5.21   11.58
 #   D2       -          -        5.19   11.61     <- arm만 쟀을 때
 #
-# 기본은 꺼져 있다 (USE_MEASURED=False). 켜는 방법은 두 가지다.
-#   - 환경변수 : KSPEC_USE_MEASURED=1
-#   - 호출 인자: mtlcal(..., use_measured=True)
+# 기본은 켜져 있다 (USE_MEASURED=True). 끄는 방법은 두 가지다.
+#   - 환경변수 : KSPEC_USE_MEASURED=0
+#   - 호출 인자: mtlcal(..., use_measured=False)
+# 파일이 없으면 (인자로 명시해 켠 경우가 아니면) 경고만 남기고 설계값을 쓴다.
 # 파일 경로는 KSPEC_MEASURED_GEOMETRY 로 바꿀 수 있다.
 MEASURED_GEOMETRY_ENV = 'KSPEC_MEASURED_GEOMETRY'
 DEFAULT_MEASURED_GEOMETRY_PATH = str(
@@ -139,8 +140,15 @@ MEASURED_GEOMETRY_PATH = (os.environ.get(MEASURED_GEOMETRY_ENV)
                           or DEFAULT_MEASURED_GEOMETRY_PATH)
 
 USE_MEASURED_ENV = 'KSPEC_USE_MEASURED'
-USE_MEASURED = os.environ.get(USE_MEASURED_ENV, '').strip().lower() in (
-    '1', 'true', 'yes', 'on')
+# 기본은 켜져 있다 (2026-10 부터: 새 plate 의 fiducial 핀홀 실측값이 패키지에 들어 있다).
+# 끄려면 KSPEC_USE_MEASURED=0 또는 mtlcal(..., use_measured=False).
+USE_MEASURED = os.environ.get(USE_MEASURED_ENV, '1').strip().lower() not in (
+    '0', 'false', 'no', 'off')
+
+# 실측 좌표가 설계 좌표에서 이보다 멀면 다른 plate 의 파일로 보고 멈춘다 [mm].
+# 핀홀은 홀 중심에서 0.5 mm 안에 있고, 표를 바꿔도 fiducial ID 가 상당수 겹치므로
+# 옛 plate 의 실측값이 조용히 적용되는 것을 이 검사로 막는다.
+MEASURED_MAX_DEV = 1.0
 
 
 def measured_geometry(path=None):
