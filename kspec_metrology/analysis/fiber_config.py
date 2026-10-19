@@ -324,6 +324,25 @@ FIBERS = load_fibers()
 # 아래 ID는 사용하지 않는다. 지금은 전부 쓴다.
 FIDUCIAL_EXCLUDE = ()
 
+# 끊어졌거나 불이 안 들어오는 fiber. 표와 target 파일, json key 순서는 그대로 두고
+# (positioner 는 그대로 꽂혀 있다) 이미지에서 찾지 않고 매칭에서 뺀다. 그 fiber 의
+# 위치 오차는 NaN, 회전량은 0 으로 나온다 (누적 각도는 직전 값 유지).
+#   환경변수 : KSPEC_FIBER_EXCLUDE="C4,D2"
+#   코드     : fiber_config.FIBER_EXCLUDE = ('C4', 'D2')   (import 뒤에 바꿔도 된다)
+FIBER_EXCLUDE_ENV = 'KSPEC_FIBER_EXCLUDE'
+FIBER_EXCLUDE = tuple(t.strip() for t in
+                      os.environ.get(FIBER_EXCLUDE_ENV, '').replace(';', ',').split(',') if t.strip())
+
+
+def dead_mask():
+    """fiber_ids() 순서로, 쓰지 않는(끊어진) fiber 면 True."""
+    ids = list(fiber_ids())
+    unknown = [f for f in FIBER_EXCLUDE if f not in ids]
+    if unknown:
+        raise ValueError(f"FIBER_EXCLUDE 에 표의 positioner 가 아닌 ID 가 있다: {unknown} "
+                         f"(표 {FIBER_TABLE_PATH})")
+    return np.array([i in FIBER_EXCLUDE for i in ids], dtype=bool)
+
 # find_angle_double_method2_select_elbow에 넘기는 자세 정의
 ELBOW = "down"
 CLOCKWISE = False

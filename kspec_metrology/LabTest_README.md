@@ -42,6 +42,9 @@ LabTest_README.md            이 파일
 | fiducial 따로 (case 1) | fiber 노출 | `[fiducial 노출]` |
 | fiducial 두 노출 (case 2) | fiber 노출 | `[t1_1, t1_2]` (fiducial 마다 포화 안 된 밝은 쪽) |
 
+**끊어진 fiber**: 노트북 1절의 `BROKEN_FIBERS = ['C4']` 처럼 ID 를 적는다. 표와
+목표 파일은 그대로 두고 그 fiber 만 이미지에서 찾지 않는다 (결과는 NaN / 회전량 0).
+
 ## 출력 (`OUT_DIR`)
 
 - `{TILE}_MetrologyTrial_1_offset.txt` — fiber 별 남은 위치 오차 dx, dy [µm] 와 회전량 dalpha, dbeta [deg]

@@ -281,6 +281,11 @@ def _inspect(data_dir, head, fid_heads, target_file, nexposure=1, fid_nexposure=
     xo, yo, x, y, fid_flag, nfib = load_configuration(
         target_file, apply_pinhole_offset=apply_pinhole_offset, use_measured=use_measured)
     ids = _all_ids()
+    # 끊어진 fiber 는 빼고 본다 (mtlcal 과 같다)
+    dead = np.r_[cfg.dead_mask(), np.zeros(x.size-nfib, dtype=bool)]
+    x, y, fid_flag = x[~dead], y[~dead], fid_flag[~dead]
+    ids = [i for i, d in zip(ids, dead) if not d]
+    nfib = int((~dead[:nfib]).sum())
     pk = dict(threshold=threshold, nwindow=nwindow, niter_recenter=niter_recenter, finder=finder,
               finder_opts=finder_opts, background=background, background_opts=background_opts)
     fid_nexposure = nexposure if fid_nexposure is None else fid_nexposure

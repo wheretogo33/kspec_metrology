@@ -305,6 +305,7 @@ class MetrologyRun:
     def error(self, dx, dy):
         """fiber(앞쪽 nfib개)의 위치 오차 (max, median) [um]."""
         dist = np.sqrt(dx[:self.nfib]**2 + dy[:self.nfib]**2)*1e3
+        dist = dist[np.isfinite(dist)]                          # 끊어진 fiber (NaN) 는 뺀다
         return float(dist.max()), float(np.median(dist))
 
     def trial(self, expose=True):

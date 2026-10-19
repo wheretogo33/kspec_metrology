@@ -208,6 +208,24 @@ INFO Measured geometry /경로/Measured_Geometry.txt: 2/103 holes replaced
 실측 위치를 적은 fiducial 에는 핀홀 오프셋을 **더하지 않는다** (이중 계산이
 되므로). 위치를 아직 안 잰 fiducial 에만 오프셋이 적용된다.
 
+### 끊어진 fiber
+
+fiber 가 끊어져 불이 안 들어오면 표와 target 파일, json key 순서는 그대로 두고
+그 fiber 만 제외한다 (positioner 는 그대로 꽂혀 있으므로 표에서 지우면 target
+파일과 json 순서가 다 바뀐다).
+
+```bash
+KSPEC_FIBER_EXCLUDE="C4,D2" python ...        # 환경변수
+```
+```python
+from kspec_metrology.analysis import fiber_config as cfg
+cfg.FIBER_EXCLUDE = ('C4', 'D2')              # import 뒤에 바꿔도 된다
+```
+
+제외된 fiber 는 이미지에서 찾지 않고(검출 기대 개수가 줄어든다) 매칭에서 빠진다.
+결과에서는 위치 오차가 NaN, 회전량이 0 이고 누적 각도는 직전 값을 유지한다.
+offset 표에는 `nan` 으로 적힌다. 표에 없는 ID 를 적으면 예외가 난다.
+
 ### 설정이 여러 개일 때
 
 표의 기본 위치는 패키지 안(`analysis/Fiber_Configuration_config73.txt`)이다.

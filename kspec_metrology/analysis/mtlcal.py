@@ -190,9 +190,11 @@ def _arm_angles(xorigin, yorigin, xtarget, ytarget, use_measured=None):
     """각 positioner가 (xtarget, ytarget)을 가리키는 (theta, phi)를 구한다."""
     arm1s, arm2s = cfg.arm_lengths(use_measured)
 
-    theta = np.zeros(arm1s.size)
-    phi = np.zeros(arm1s.size)
+    theta = np.full(arm1s.size, np.nan)
+    phi = np.full(arm1s.size, np.nan)
     for i in range(arm1s.size):
+        if not (np.isfinite(xtarget[i]) and np.isfinite(ytarget[i])):
+            continue                                            # 끊어진 fiber: 측정값 없음
         theta[i], phi[i] = find_angle_double_method2_select_elbow(
             xorigin[i], yorigin[i], xtarget[i], ytarget[i], arm1s[i], arm2s[i],
             elbow=cfg.ELBOW,
@@ -289,7 +291,8 @@ def save_offsets(json_dir, target_name, itrial, dx, dy, angle_rot, nfib):
     os.makedirs(json_dir, exist_ok=True)
     path = naming.offset_path(json_dir, target_name, itrial)
     with open(path, 'w') as ff:
-        ff.write("# fiber position error (measured - target) and this trial's rotation\n")
+        ff.write("# fiber position error (measured - target) and this trial's rotation; "
+                 "nan = excluded (broken) fiber\n")
         ff.write(f"# {'ID':<6} {'dx[um]':>9} {'dy[um]':>9} {'dalpha[deg]':>12} {'dbeta[deg]':>12}\n")
         for k, hole in enumerate(cfg.fiber_ids()[:nfib]):
             ff.write(f"  {hole:<6} {dx[k]*1e3:9.1f} {dy[k]*1e3:9.1f} "
@@ -467,26 +470,34 @@ def mtlcal(data_dir='./MTL/data/'
               finder=finder, finder_opts=finder_opts, background=background,
               background_opts=background_opts)
 
+    # 끊어진 fiber (fiber_config.FIBER_EXCLUDE): 찾지 않고 매칭에서 뺀다. 배열 순서는 그대로.
+    dead = np.r_[cfg.dead_mask(), np.zeros(x.size-nfib, dtype=bool)]
+    if dead.any():
+        log.info("Excluded fiber(s) (not expected in the image): %s",
+                 ", ".join(h for h, d in zip(cfg.fiber_ids(), dead[:nfib]) if d))
+    xa, ya, fa = x[~dead], y[~dead], fid_flag[~dead]
+    nfib_a = int((~dead[:nfib]).sum())
+
     if fid_head is None:
         #---이미지 한 벌: fiber 와 fiducial 을 같이 찾는다-------------------------
-        npeaks = x.size if (mode != "Raw" or n_extra == 0) else (x.size, x.size + n_extra)
+        npeaks = xa.size if (mode != "Raw" or n_extra == 0) else (xa.size, xa.size + n_extra)
         _, xobs, yobs, _, nsat = findpeak(npeaks, data_dir=data_dir, head=head,
-                                          nexposure=nexposure, mode=mode, x=x, y=y,
+                                          nexposure=nexposure, mode=mode, x=xa, y=ya,
                                           sat_level=sat_level, ReturnNsat=True, **pk)
 
         imatch, theta_guess, (xoff_guess, yoff_guess) = matchfiber(
-            x, y, xobs, yobs, m_init=magnification)
+            xa, ya, xobs, yobs, m_init=magnification)
 
-        nsat_fid = int((nsat[imatch][fid_flag] > 0).sum())
+        nsat_fid = int((nsat[imatch][fa] > 0).sum())
         if nsat_fid:
             log.warning("%d fiducial(s) saturated; consider a separate fiducial "
                         "exposure (fid_head / fid_exptime)", nsat_fid)
 
-        xfocal, yfocal, dx, dy, _ = fitdistortion(x, y, fid_flag
-                                                  , xobs, yobs
-                                                  , imatch, theta_guess
-                                                  , xoff_guess, yoff_guess
-                                                  , model=model, m_init=magnification)
+        xf_a, yf_a, _, _, _ = fitdistortion(xa, ya, fa
+                                            , xobs, yobs
+                                            , imatch, theta_guess
+                                            , xoff_guess, yoff_guess
+                                            , model=model, m_init=magnification)
     else:
         #---노출을 나눠 찍은 경우: fiducial 노출로 변환을 맞추고 fiber 노출에 적용----
         fid_heads = [fid_head] if isinstance(fid_head, str) else list(fid_head)
@@ -494,7 +505,7 @@ def mtlcal(data_dir='./MTL/data/'
         x_fid, y_fid = x[fid_flag], y[fid_flag]
 
         xo_fid, yo_fid, _, theta_guess, (xoff_guess, yoff_guess) = measure_fiducials(
-            fid_heads, x, y, fid_flag, data_dir, fid_nexposure, n_extra=n_extra,
+            fid_heads, xa, ya, fa, data_dir, fid_nexposure, n_extra=n_extra,
             m_init=magnification, sat_level=sat_level, fid_min_peak=fid_min_peak, **pk)
 
         xf_fid, yf_fid, dxf, dyf, coeff = fitdistortion(
@@ -502,10 +513,13 @@ def mtlcal(data_dir='./MTL/data/'
             np.arange(x_fid.size), theta_guess, xoff_guess, yoff_guess,
             model=model, m_init=magnification)
 
-        xfocal, yfocal, _, _ = measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure,
-                                              n_extra=n_extra, **pk)
-        xfocal[fid_flag], yfocal[fid_flag] = xf_fid, yf_fid     # fiducial 은 전용 노출 값
-        dx, dy = xfocal-x, yfocal-y
+        xf_a, yf_a, _, _ = measure_fibers(head, xa, ya, nfib_a, coeff, data_dir, nexposure,
+                                          n_extra=n_extra, **pk)
+        xf_a[fa], yf_a[fa] = xf_fid, yf_fid                      # fiducial 은 전용 노출 값
+
+    xfocal = np.full(x.size, np.nan); yfocal = np.full(y.size, np.nan)
+    xfocal[~dead], yfocal[~dead] = xf_a, yf_a                   # 끊어진 fiber 는 NaN
+    dx, dy = xfocal-x, yfocal-y
 
     #---보정각 계산 (fiber만)---------------------------------------------------
     theta_true, phi_true = _arm_angles(xorigin, yorigin, x, y, use_measured)
@@ -513,6 +527,7 @@ def mtlcal(data_dir='./MTL/data/'
                                      use_measured)
 
     dtheta, dphi = _wrap(theta_true - theta_obs, phi_true - phi_obs)
+    dtheta[dead[:nfib]] = 0.; dphi[dead[:nfib]] = 0.             # 끊어진 fiber 는 안 움직인다
 
     angle_rot = _flatten_angles(dtheta, dphi)
 
@@ -538,7 +553,7 @@ def mtlcal(data_dir='./MTL/data/'
         log.info("Saved fiber offsets to %s",
                  save_offsets(json_dir, target_name, itrial, dx, dy, angle_rot, nfib))
 
-    dist = np.sqrt(dx[~fid_flag]**2 + dy[~fid_flag]**2)*1e3
+    dist = np.sqrt(dx[~fid_flag & ~dead]**2 + dy[~fid_flag & ~dead]**2)*1e3
     log.info("Fiber position error: max %.1f um, median %.1f um",
              dist.max(), np.median(dist))
 
