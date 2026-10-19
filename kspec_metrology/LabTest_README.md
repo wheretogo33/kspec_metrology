@@ -6,50 +6,56 @@
 
 ```
 kspec_metrology_LabTest/     패키지 (analysis, exposure, lab, mtlrun ...)
-LabTest_Metrology.ipynb      순서대로 실행하는 노트북
+LabTest_Metrology.ipynb      순서대로 실행하는 노트북 (한 배치를 한 번 측정)
 LabTest_README.md            이 파일
 ```
 
 ## 쓰는 법
 
 1. zip 을 아무 폴더에나 푼다 (예: `/home/lab/metrology/`).
-2. `LabTest_Metrology.ipynb` 를 열고 첫 셀의 `PKG_DIR` 을 그 폴더로, `WORK_DIR` 을
-   이미지·결과를 쓸 폴더로, `POSITIONERS` 를 꽂힌 홀 ID 로 바꾼다.
-3. 셀을 순서대로 실행한다. 설정 셀을 바꾸면 커널을 재시작하고 처음부터 다시.
+2. `LabTest_Metrology.ipynb` 를 열고 첫 셀의 `PKG_DIR`(푼 폴더) 과 `OUT_DIR`(결과 폴더),
+   2절의 목표 파일·이미지 경로를 바꾼다.
+3. 셀을 순서대로 실행한다. 설정 셀(표)을 바꾸면 커널을 재시작한다.
 
-필요한 파이썬 패키지: numpy, scipy, astropy, photutils, sep, matplotlib, jupyter
-(옛 kspec_metrology 가 돌던 환경이면 있다). 카메라는 `exposure/lib/libqhyccd.so`
-를 쓰며 패키지에 들어 있다.
+필요한 파이썬 패키지: numpy, scipy, astropy, photutils, sep, matplotlib, pandas, jupyter
+(옛 kspec_metrology 가 돌던 환경이면 있다).
 
-## 목표 위치 파일
+## 입력
 
-한 줄에 `ID  v1  v2` (공백/쉼표 구분, `#` 뒤 주석). 표의 positioner 전부가 있어야 한다.
+**fiber 표**: 패키지 기본 `analysis/Fiber_Configuration_config73.txt`
+(positioner 73 + fiducial 30). 바깥 sky fiber 9개 홀은 −9 로 표에서 빠져 있고,
+켜져 있으면 `N_EXTRA = 9` 로 "표에 없는 밝은 점" 으로 처리한다.
 
-```
-# ID   x[mm]    y[mm]
-C4    -1.4812   82.3105
-C5    17.5000   82.2724
-```
+**목표 파일**: `object.info` 와 같은 json. 배열은 표의 positioner 순서(73개).
 
-- `KIND = 'xy'`: 초점면 목표 (x, y) [mm]
-- `KIND = 'ab'`: positioner 각도 (alpha, beta) [deg]. json 과 같은 부호 규약이며,
-  회전 중심(실측값)과 arm 길이로 (x, y) 로 바꾼다.
-
-## 이미지 이름 (이미 찍어 둔 이미지로 계산할 때)
-
-`WORK_DIR/data/` 에 다음 이름으로 둔다 (`i` = trial 번호, 1 부터).
-
-```
-{TILE}_MetrologyTrial_{i}_0.fits          fiber 노출
-{TILE}_MetrologyTrial_{i}_fid0_0.fits     fiducial 전용 노출 세트 0
-{TILE}_MetrologyTrial_{i}_fid1_0.fits     fiducial 전용 노출 세트 1 (FID_EXPTIME 이 리스트일 때)
+```json
+{"xp": [...], "yp": [...]}              초점면 목표 [mm]
+{"alpha": [...], "beta": [...]}         positioner 각도 [deg]
+{"C4_a": ..., "C4_b": ..., ...}         각도 json (이 패키지의 출력 형식)
 ```
 
-## 결과
+**이미지**: FITS 경로 1–3 개.
 
-`WORK_DIR/json/` 에 trial 마다
+| 경우 | `FIBER_IMAGE` | `FID_IMAGES` |
+|---|---|---|
+| 한 노출에 fiber + fiducial | 그 이미지 | `[]` |
+| fiducial 따로 (case 1) | fiber 노출 | `[fiducial 노출]` |
+| fiducial 두 노출 (case 2) | fiber 노출 | `[t1_1, t1_2]` (fiducial 마다 포화 안 된 밝은 쪽) |
 
-- `{TILE}_MetrologyTrial_{i}.json` — 누적 각도 (positioner 로 보낼 값)
-- `{TILE}_MetrologyTrial_{i}_offset.txt` — fiber 별 남은 위치 오차 [µm] 와 이번 회전량 [deg]
+## 출력 (`OUT_DIR`)
 
-자세한 설명은 패키지 안 `README.md` (본 장비용 설명이지만 인자는 같다).
+- `{TILE}_MetrologyTrial_1_offset.txt` — fiber 별 남은 위치 오차 dx, dy [µm] 와 회전량 dalpha, dbeta [deg]
+- `{TILE}_MetrologyTrial_1.json` — 목표 각도 + 회전량 (positioner 로 보낼 누적 각도)
+- `data/` — 분석에 쓴 이미지 링크, `{TILE}_target.info` — (x, y) 로 바꾼 목표
+
+## 파이썬에서 직접
+
+```python
+from kspec_metrology_LabTest import lab
+res = lab.measure(target_file, fiber_image, [fid1, fid2], out_dir='lab_out',
+                  magnification=8.40, n_extra=9)
+lab.offsets_table(res)      # fiber 별 표
+lab.show_steps(res)         # 단계별 그림
+```
+
+자세한 인자 설명은 패키지 안 `README.md`.

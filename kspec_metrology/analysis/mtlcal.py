@@ -298,7 +298,7 @@ def save_offsets(json_dir, target_name, itrial, dx, dy, angle_rot, nfib):
 
 
 def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
-                      m_init=None, sat_level=65000., fid_min_peak=0., **pk):
+                      m_init=None, sat_level=65000., fid_min_peak=0., n_extra=0, **pk):
     """fiducial 전용 노출 세트들에서 fiducial 의 카메라 좌표를 잰다.
 
     x, y 는 fiber 목표 + fiducial 설계 위치 전체, fid_flag 는 그중 fiducial.
@@ -317,7 +317,7 @@ def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
     nfid, nfib = int(fid_flag.sum()), int((~fid_flag).sum())
     sets = []
     for k, head in enumerate(fid_heads):
-        _, xobs, yobs, peak, nsat = findpeak((nfid, nfid+nfib), data_dir=data_dir, head=head,
+        _, xobs, yobs, peak, nsat = findpeak((nfid, nfid+nfib+n_extra), data_dir=data_dir, head=head,
                                              nexposure=nexposure, sat_level=sat_level,
                                              ReturnNsat=True, **pk)
         if xobs.size > nfid:
@@ -356,7 +356,7 @@ def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
     return xobs, yobs, choice, last['theta'], last['off']
 
 
-def measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, max_dist=None, **pk):
+def measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, max_dist=None, n_extra=0, **pk):
     """fiber 노출에서 peak 을 찾아 (fiducial 로 맞춘) 변환으로 focal 좌표로 옮기고
     목표 위치에 가장 가까운 것을 그 fiber 로 본다. x, y 는 fiber + fiducial 전체
     목표 (fiducial 은 그 자리의 검출을 fiber 로 잘못 잡지 않게 하려고 넣는다).
@@ -365,7 +365,7 @@ def measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, max_dist=None, 
     """
     log = get_logger()
     nfid = x.size - nfib
-    _, xobs, yobs, _ = findpeak((nfib, nfib+nfid), data_dir=data_dir, head=head,
+    _, xobs, yobs, _ = findpeak((nfib, nfib+nfid+n_extra), data_dir=data_dir, head=head,
                                 nexposure=nexposure, **pk)
     xf, yf = transform(xobs, yobs, coeff)
     dist, j = cKDTree(np.column_stack((xf, yf))).query(np.column_stack((x, y)))
@@ -399,6 +399,7 @@ def mtlcal(data_dir='./MTL/data/'
            , magnification=None
            , sat_level=65000.
            , fid_min_peak=0.
+           , n_extra=0
            , target_file=None
            , json_dir=None
            , target_name=None
@@ -421,7 +422,8 @@ def mtlcal(data_dir='./MTL/data/'
     magnification 은 camera -> focal 배율 초기값으로, 본 장비와 광학계가 다르면
     (실험실) 꼭 주어야 fiber 매칭이 된다 (utils.CAMERA2FOCAL_M 참고; 부호 포함).
     sat_level 은 포화 판정 수준 [ADU], fid_min_peak 은 fiducial 노출을 고를 때 이보다
-    어두운 검출을 피하는 기준이다.
+    어두운 검출을 피하는 기준이다. n_extra 는 표에 없는데 이미지에 보이는 밝은 점의 수
+    (예: 고정된 sky fiber 9개). 그만큼 검출을 더 허용하고 매칭에서 자연히 빠진다.
 
     mode는 findpeak에 그대로 넘어간다. "Raw"는 threshold를 조절해 가며 peak을
     찾고, "Predict"는 목표 위치에서 출발해 가장 밝은 픽셀로 정렬한다.
@@ -467,7 +469,7 @@ def mtlcal(data_dir='./MTL/data/'
 
     if fid_head is None:
         #---이미지 한 벌: fiber 와 fiducial 을 같이 찾는다-------------------------
-        npeaks = x.size
+        npeaks = x.size if (mode != "Raw" or n_extra == 0) else (x.size, x.size + n_extra)
         _, xobs, yobs, _, nsat = findpeak(npeaks, data_dir=data_dir, head=head,
                                           nexposure=nexposure, mode=mode, x=x, y=y,
                                           sat_level=sat_level, ReturnNsat=True, **pk)
@@ -492,7 +494,7 @@ def mtlcal(data_dir='./MTL/data/'
         x_fid, y_fid = x[fid_flag], y[fid_flag]
 
         xo_fid, yo_fid, _, theta_guess, (xoff_guess, yoff_guess) = measure_fiducials(
-            fid_heads, x, y, fid_flag, data_dir, fid_nexposure,
+            fid_heads, x, y, fid_flag, data_dir, fid_nexposure, n_extra=n_extra,
             m_init=magnification, sat_level=sat_level, fid_min_peak=fid_min_peak, **pk)
 
         xf_fid, yf_fid, dxf, dyf, coeff = fitdistortion(
@@ -500,7 +502,8 @@ def mtlcal(data_dir='./MTL/data/'
             np.arange(x_fid.size), theta_guess, xoff_guess, yoff_guess,
             model=model, m_init=magnification)
 
-        xfocal, yfocal, _, _ = measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, **pk)
+        xfocal, yfocal, _, _ = measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure,
+                                              n_extra=n_extra, **pk)
         xfocal[fid_flag], yfocal[fid_flag] = xf_fid, yf_fid     # fiducial 은 전용 노출 값
         dx, dy = xfocal-x, yfocal-y
 

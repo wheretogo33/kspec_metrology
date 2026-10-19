@@ -120,6 +120,7 @@ class MetrologyRun:
                       광학계(실험실)에서는 꼭 준다 (utils.CAMERA2FOCAL_M 참고)
         sat_level   : 포화 판정 수준 [ADU]
         fid_min_peak : fiducial 노출을 고를 때 이보다 어두운 검출은 피한다 [ADU]
+        n_extra     : 표에 없는데 이미지에 보이는 밝은 점의 수 (고정 sky fiber 등)
         tile        : 파일 이름에 쓸 타일 이름. None이면 target 파일에서 읽는다
     """
 
@@ -152,6 +153,7 @@ class MetrologyRun:
                  , magnification=None
                  , sat_level=65000.
                  , fid_min_peak=0.
+                 , n_extra=0
                  , tile=None):
 
         if metric not in ('max', 'median'):
@@ -197,6 +199,7 @@ class MetrologyRun:
         self.magnification = magnification
         self.sat_level = sat_level
         self.fid_min_peak = fid_min_peak
+        self.n_extra = n_extra
 
         self.nfib = len(cfg.fiber_ids())
 
@@ -293,6 +296,7 @@ class MetrologyRun:
                       , magnification=self.magnification
                       , sat_level=self.sat_level
                       , fid_min_peak=self.fid_min_peak
+                      , n_extra=self.n_extra
                       , target_file=self.target_file
                       , json_dir=self.json_dir
                       , target_name=self.tile

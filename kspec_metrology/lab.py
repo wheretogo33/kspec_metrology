@@ -5,10 +5,13 @@
 바꾸고, 꽂힌 positioner 만 남긴 fiber 표를 만들고, 각 단계의 결과를 그림으로
 보여 준다. 분석 자체는 analysis/ 의 함수를 그대로 쓴다.
 
+    measure            목표 파일 + 이미지 1-3장 -> fiber 위치 오차와 회전량 (한 번 측정)
+    show_steps         measure 의 결과를 단계별 그림으로 (검출 / fiducial 매칭 / fiber 매칭)
+    read_targets       object.info 형식(xp, yp 또는 각도) 목표 파일 읽기
     make_fiber_table   꽂힌 홀만 positioner 로 둔 Fiber_Configuration 표
     ab2xy, xy2ab       positioner 각도 <-> 초점면 좌표 (패키지 각도 규약 그대로)
     make_target_file   'ID x y' 또는 'ID alpha beta' 텍스트 -> target json
-    inspect_trial      한 trial 의 이미지를 단계별로 다시 분석해 그림으로 (결과는 안 바꿈)
+    inspect_trial      MetrologyRun 의 한 trial 을 단계별 그림으로
     show_image, show_detections, show_matching, show_offsets   확인 그림
 """
 
@@ -24,6 +27,7 @@ from kspec_metrology.analysis.findpeak import findpeak
 from kspec_metrology.analysis.matchfiber import matchfiber
 from kspec_metrology.analysis.fitdistortion import fitdistortion
 from kspec_metrology.naming import image_path
+from kspec_metrology import naming
 
 PIX_MM = 3.76e-3          # 카메라 화소 크기 [mm]
 rtod = 180./np.pi
@@ -260,47 +264,52 @@ def show_offsets(offset_file, ax=None):
 
 
 # ============================================================================ 단계별 확인
-def inspect_trial(run, itrial, n=8):
-    """MetrologyRun 이 분석한 trial 의 이미지를 같은 설정으로 단계별로 다시 돌려 그림으로
-    보여 준다 (검출 -> fiducial 매칭/변환 fit -> fiber 매칭). json 은 건드리지 않는다.
-    반환: dict(x, y, fid_flag, xfocal, yfocal, coeff, ids)"""
-    import matplotlib.pyplot as plt
+def _all_ids():
+    """load_configuration 과 같은 순서의 홀 ID (fiber 표 순서 + fiducial)."""
+    return list(cfg.fiber_ids()) + [i for i, f in zip(_table_ids(), _table_flags())
+                                   if f == 1 and i not in cfg.FIDUCIAL_EXCLUDE]
+
+
+def _inspect(data_dir, head, fid_heads, target_file, nexposure=1, fid_nexposure=None, mode='Raw',
+             threshold=3e3, nwindow=40, niter_recenter=0, finder='sep', finder_opts=None,
+             background='crop', background_opts=None, magnification=None, model='full',
+             sat_level=65000., fid_min_peak=0., n_extra=0, use_measured=None,
+             apply_pinhole_offset=False, n=8):
+    """mtlcal 과 같은 설정으로 단계별로 다시 분석하며 그림을 그린다. json 은 건드리지 않는다."""
     from kspec_metrology.analysis.mtlcal import (load_configuration, measure_fiducials,
                                                  measure_fibers)
     xo, yo, x, y, fid_flag, nfib = load_configuration(
-        run.target_file, apply_pinhole_offset=run.apply_pinhole_offset, use_measured=run.use_measured)
-    ids = list(cfg.fiber_ids()) + [i for i, f in zip(_table_ids(), _table_flags()) if f == 1
-                                   and i not in cfg.FIDUCIAL_EXCLUDE]
-    pk = dict(threshold=run.threshold, nwindow=run.nwindow, niter_recenter=run.niter_recenter,
-              finder=run.finder, finder_opts=run.finder_opts, background=run.background,
-              background_opts=run.background_opts)
-    head = run.image_head(itrial)
-    heads = run.fid_image_heads(itrial)
-    im = load_frames(run.data_dir, head, run.nexposure)
-    if heads:
+        target_file, apply_pinhole_offset=apply_pinhole_offset, use_measured=use_measured)
+    ids = _all_ids()
+    pk = dict(threshold=threshold, nwindow=nwindow, niter_recenter=niter_recenter, finder=finder,
+              finder_opts=finder_opts, background=background, background_opts=background_opts)
+    fid_nexposure = nexposure if fid_nexposure is None else fid_nexposure
+    im = load_frames(data_dir, head, nexposure)
+    if fid_heads:
         xo_f, yo_f, choice, th, (ox, oy) = measure_fiducials(
-            heads, x, y, fid_flag, run.data_dir, run.fid_nexposure, m_init=run.magnification,
-            sat_level=run.sat_level, fid_min_peak=run.fid_min_peak, **pk)
+            list(fid_heads), x, y, fid_flag, data_dir, fid_nexposure, m_init=magnification,
+            sat_level=sat_level, fid_min_peak=fid_min_peak, n_extra=n_extra, **pk)
         fid_ids = [i for i, f in zip(ids, fid_flag) if f]
-        for k, h in enumerate(heads):
-            imf = load_frames(run.data_dir, h, run.fid_nexposure)
+        for k, h in enumerate(fid_heads):
+            imf = load_frames(data_dir, h, fid_nexposure)
             show_detections(imf, xo_f, yo_f, labels=fid_ids, flag=(choice != k), n=n,
                             title=f'fiducial set {k} ({h}): cyan = used from this set, orange = taken from another set')
         xf, yf, _, _, coeff = fitdistortion(
             x[fid_flag], y[fid_flag], np.ones(int(fid_flag.sum()), bool), xo_f, yo_f,
-            np.arange(int(fid_flag.sum())), th, ox, oy, model=run.model, m_init=run.magnification)
+            np.arange(int(fid_flag.sum())), th, ox, oy, model=model, m_init=magnification)
         xfocal, yfocal, dist, (xobs, yobs) = measure_fibers(
-            head, x, y, nfib, coeff, run.data_dir, run.nexposure, **pk)
+            head, x, y, nfib, coeff, data_dir, nexposure, n_extra=n_extra, **pk)
         xfocal[fid_flag], yfocal[fid_flag] = xf, yf
         show_detections(im, xobs, yobs, labels=ids, flag=fid_flag, n=n,
                         title=f'fiber image ({head}): matched peaks (orange = fiducial positions, not used)')
     else:
-        _, xobs, yobs, peak, nsat = findpeak(x.size, data_dir=run.data_dir, head=head,
-                                             nexposure=run.nexposure, mode=run.mode, x=x, y=y,
-                                             sat_level=run.sat_level, ReturnNsat=True, **pk)
-        imatch, th, (ox, oy) = matchfiber(x, y, xobs, yobs, m_init=run.magnification)
+        npk = x.size if (mode != 'Raw' or n_extra == 0) else (x.size, x.size + n_extra)
+        _, xobs, yobs, peak, nsat = findpeak(npk, data_dir=data_dir, head=head, nexposure=nexposure,
+                                             mode=mode, x=x, y=y, sat_level=sat_level,
+                                             ReturnNsat=True, **pk)
+        imatch, th, (ox, oy) = matchfiber(x, y, xobs, yobs, m_init=magnification)
         xfocal, yfocal, _, _, coeff = fitdistortion(x, y, fid_flag, xobs, yobs, imatch, th, ox, oy,
-                                                    model=run.model, m_init=run.magnification)
+                                                    model=model, m_init=magnification)
         show_detections(im, xobs[imatch], yobs[imatch], labels=ids, flag=fid_flag, n=n,
                         title=f'{head}: matched peaks (orange = fiducial); saturated: {int((nsat[imatch] > 0).sum())}')
     show_matching(x, y, xfocal, yfocal, fid_flag, ids)
@@ -309,6 +318,131 @@ def inspect_trial(run, itrial, n=8):
     print(f"fiducial fit residual: rms {np.sqrt((r_fid**2).mean()):.1f} um, max {r_fid.max():.1f} um   |   "
           f"fiber - target: median {np.median(r_fib):.1f} um, max {r_fib.max():.1f} um")
     return dict(x=x, y=y, fid_flag=fid_flag, xfocal=xfocal, yfocal=yfocal, coeff=coeff, ids=ids)
+
+
+def inspect_trial(run, itrial, n=8):
+    """MetrologyRun 이 분석한 trial 을 같은 설정으로 단계별로 다시 돌려 그림으로 보여 준다."""
+    return _inspect(run.data_dir, run.image_head(itrial), run.fid_image_heads(itrial), run.target_file,
+                    nexposure=run.nexposure, fid_nexposure=run.fid_nexposure, mode=run.mode,
+                    threshold=run.threshold, nwindow=run.nwindow, niter_recenter=run.niter_recenter,
+                    finder=run.finder, finder_opts=run.finder_opts, background=run.background,
+                    background_opts=run.background_opts, magnification=run.magnification,
+                    model=run.model, sat_level=run.sat_level, fid_min_peak=run.fid_min_peak,
+                    n_extra=run.n_extra, use_measured=run.use_measured,
+                    apply_pinhole_offset=run.apply_pinhole_offset, n=n)
+
+
+# ============================================================================ 한 번 측정
+def read_targets(path):
+    """목표 파일 -> (xp, yp, kind). object.info 와 같은 json 이고 셋 중 하나를 담는다.
+        {"xp": [...], "yp": [...]}            초점면 목표 [mm]            (kind 'xy')
+        {"alpha": [...], "beta": [...]}       positioner 각도 [deg]      (kind 'ab')
+        {"C4_a": .., "C4_b": .., ...}         각도 json (mtlcal 출력 형식) (kind 'ab')
+    배열은 fiber 표의 positioner 순서여야 한다. 각도는 json 과 같은 부호 규약."""
+    data = json.load(open(path))
+    low = {str(k).lower(): v for k, v in data.items()}
+    ids = list(cfg.fiber_ids())
+    if 'xp' in low and 'yp' in low:
+        xp, yp, kind = np.asarray(low['xp'], float), np.asarray(low['yp'], float), 'xy'
+    elif 'alpha' in low and 'beta' in low:
+        xp, yp, kind = np.asarray(low['alpha'], float), np.asarray(low['beta'], float), 'ab'
+    elif all(f"{i}_a" in data and f"{i}_b" in data for i in ids):
+        xp = np.array([data[f"{i}_a"] for i in ids], float)
+        yp = np.array([data[f"{i}_b"] for i in ids], float)
+        kind = 'ab'
+    else:
+        raise ValueError(f"{path}: 'xp'/'yp', 'alpha'/'beta', 또는 '{{ID}}_a'/'{{ID}}_b' 키가 필요하다")
+    if xp.size != len(ids) or yp.size != len(ids):
+        raise ValueError(f"{path}: 값이 {xp.size}/{yp.size} 개인데 표의 positioner 는 {len(ids)} 개다 "
+                         f"({cfg.FIBER_TABLE_PATH})")
+    return xp, yp, kind
+
+
+def measure(target_file, fiber_image, fid_images=(), out_dir='./lab_out', tile='lab',
+            magnification=None, model='full', nwindow=40, threshold=3e3, niter_recenter=0,
+            finder='sep', finder_opts=None, background='crop', background_opts=None,
+            sat_level=65000., fid_min_peak=0., n_extra=0, use_measured=None, mode='Raw'):
+    """한 배치를 한 번 잰다: 목표 파일과 이미지 1-3장 -> fiber 위치 오차와 positioner 회전량.
+
+    target_file : object.info 형식 (read_targets 참고; xp/yp 또는 각도)
+    fiber_image : fiber 가 찍힌 FITS 경로 (fiducial 도 같이 찍혔으면 이것 한 장으로 충분)
+    fid_images  : fiducial 전용 노출 FITS 경로 0-2 개. 비면 fiber_image 에서 fiducial 도 찾고,
+                  하나면 그것으로, 둘이면 fiducial 마다 포화되지 않은 밝은 쪽을 쓴다.
+    나머지 인자는 mtlcal 과 같다. 이미지는 out_dir/data 에 패키지 이름 규칙으로 링크(복사)되고
+    결과는 out_dir 에 {tile}_MetrologyTrial_1.json (각도) 과 _offset.txt 로 남는다.
+
+    반환 dict: ids, dx, dy [mm] (fiber + fiducial, 측정 - 목표), angle_rot (deg, fiber 순서로
+    alpha, beta 번갈아), angle_cum, json, offsets, 그리고 show_steps 에 넘길 설정."""
+    import shutil
+    out_dir = os.path.abspath(out_dir)
+    data_dir = os.path.join(out_dir, 'data')
+    os.makedirs(data_dir, exist_ok=True)
+
+    # 목표: 각도면 (x, y) 로 바꿔 표준 target json 으로 저장
+    xp, yp, kind = read_targets(target_file)
+    if kind == 'ab':
+        from kspec_metrology.analysis.mtlcal import load_configuration
+        tmp = os.path.join(out_dir, '_tmp_target.json')
+        json.dump(dict(tile_id=tile, xp=[0.]*xp.size, yp=[0.]*yp.size), open(tmp, 'w'))
+        try:
+            xo, yo, _, _, _, nfib = load_configuration(tmp, apply_zenith_offset=False,
+                                                       use_measured=use_measured)
+        finally:
+            os.remove(tmp)
+        a1, a2 = cfg.arm_lengths(use_measured)
+        xp, yp = ab2xy(xo[:nfib], yo[:nfib], xp, yp, a1, a2)
+    tfile = os.path.join(out_dir, f'{tile}_target.info')
+    json.dump(dict(tile_id=tile, func='lab', xp=[float(v) for v in xp], yp=[float(v) for v in yp],
+                   zenith_angle=0.0), open(tfile, 'w'), indent=1)
+
+    def place(src, dst):
+        if os.path.lexists(dst):
+            os.remove(dst)
+        try:
+            os.symlink(os.path.abspath(src), dst)
+        except OSError:
+            shutil.copy2(src, dst)
+
+    itrial = 1
+    head = naming.image_head(tile, itrial)
+    place(fiber_image, image_path(data_dir, head, 0))
+    fid_heads = []
+    for k, f in enumerate(fid_images or ()):
+        h = naming.fid_image_head(tile, itrial, k)
+        place(f, image_path(data_dir, h, 0))
+        fid_heads.append(h)
+
+    from kspec_metrology.analysis.mtlcal import mtlcal
+    params = dict(mode=mode, threshold=threshold, nwindow=nwindow, niter_recenter=niter_recenter,
+                  finder=finder, finder_opts=finder_opts, background=background,
+                  background_opts=background_opts, magnification=magnification, model=model,
+                  sat_level=sat_level, fid_min_peak=fid_min_peak, n_extra=n_extra,
+                  use_measured=use_measured)
+    dx, dy, angle_rot, angle_cum = mtlcal(data_dir=data_dir, head=head, nexposure=1,
+                                          fid_head=fid_heads or None, target_file=tfile,
+                                          json_dir=out_dir, target_name=tile, itrial=itrial, **params)
+    return dict(ids=_all_ids(), nfib=xp.size, dx=dx, dy=dy, angle_rot=angle_rot, angle_cum=angle_cum,
+                json=naming.json_path(out_dir, tile, itrial), offsets=naming.offset_path(out_dir, tile, itrial),
+                data_dir=data_dir, head=head, fid_heads=fid_heads, target_file=tfile, params=params)
+
+
+def show_steps(res, n=8):
+    """measure 의 결과를 단계별 그림으로: fiducial 검출(세트별), fiber 매칭, 초점면 잔차."""
+    return _inspect(res['data_dir'], res['head'], res['fid_heads'], res['target_file'], n=n, **res['params'])
+
+
+def offsets_table(res):
+    """measure 결과를 fiber 별 표(pandas 가 있으면 DataFrame, 없으면 리스트)로."""
+    nfib = res['nfib']
+    rows = [(i, res['dx'][k]*1e3, res['dy'][k]*1e3, res['angle_rot'][2*k], res['angle_rot'][2*k+1],
+             res['angle_cum'][2*k], res['angle_cum'][2*k+1])
+            for k, i in enumerate(res['ids'][:nfib])]
+    cols = ('ID', 'dx_um', 'dy_um', 'dalpha_deg', 'dbeta_deg', 'alpha_deg', 'beta_deg')
+    try:
+        import pandas as pd
+        return pd.DataFrame(rows, columns=cols).set_index('ID')
+    except ImportError:
+        return [dict(zip(cols, r)) for r in rows]
 
 
 def _table_ids():
