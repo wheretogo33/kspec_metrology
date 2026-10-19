@@ -17,6 +17,7 @@
 
 import json
 import os
+import re
 
 import numpy as np
 from astropy.io import ascii, fits
@@ -363,7 +364,17 @@ def read_targets(path):
     return xp, yp, kind
 
 
-def measure(target_file, fiber_image, fid_images=(), out_dir='./lab_out', tile='lab',
+def next_trial(out_dir, tile):
+    """out_dir 에 있는 {tile}_MetrologyTrial_{k}.json 중 가장 큰 k + 1 (없으면 1)."""
+    k = 0
+    for f in os.listdir(out_dir) if os.path.isdir(out_dir) else []:
+        m = re.fullmatch(re.escape(tile) + r'_MetrologyTrial_(\d+)\.json', f)
+        if m:
+            k = max(k, int(m.group(1)))
+    return k + 1
+
+
+def measure(target_file, fiber_image, fid_images=(), out_dir='./lab_out', tile='lab', itrial=None,
             magnification=None, model='full', nwindow=40, threshold=3e3, niter_recenter=0,
             finder='sep', finder_opts=None, background='crop', background_opts=None,
             sat_level=65000., fid_min_peak=0., n_extra=0, use_measured=None, mode='Raw'):
@@ -373,15 +384,21 @@ def measure(target_file, fiber_image, fid_images=(), out_dir='./lab_out', tile='
     fiber_image : fiber 가 찍힌 FITS 경로 (fiducial 도 같이 찍혔으면 이것 한 장으로 충분)
     fid_images  : fiducial 전용 노출 FITS 경로 0-2 개. 비면 fiber_image 에서 fiducial 도 찾고,
                   하나면 그것으로, 둘이면 fiducial 마다 포화되지 않은 밝은 쪽을 쓴다.
+    itrial      : 몇 번째 측정인지. None 이면 out_dir 에 있는 json 다음 번호 (처음이면 1).
+                  누적 각도 = 직전 trial json + 이번 회전량 이므로, positioner 를 옮기고 다시
+                  찍은 이미지로 같은 out_dir/tile 로 부르면 각도가 누적된다. trial 0 json
+                  (목표 각도) 은 처음 부를 때 함께 만든다.
     나머지 인자는 mtlcal 과 같다. 이미지는 out_dir/data 에 패키지 이름 규칙으로 링크(복사)되고
-    결과는 out_dir 에 {tile}_MetrologyTrial_1.json (각도) 과 _offset.txt 로 남는다.
+    결과는 out_dir 에 {tile}_MetrologyTrial_{itrial}.json (누적 각도) 과 _offset.txt 로 남는다.
 
-    반환 dict: ids, dx, dy [mm] (fiber + fiducial, 측정 - 목표), angle_rot (deg, fiber 순서로
-    alpha, beta 번갈아), angle_cum, json, offsets, 그리고 show_steps 에 넘길 설정."""
+    반환 dict: itrial, ids, dx, dy [mm] (fiber + fiducial, 측정 - 목표), angle_rot (deg, fiber
+    순서로 alpha, beta 번갈아), angle_cum, json, offsets, 그리고 show_steps 에 넘길 설정."""
     import shutil
     out_dir = os.path.abspath(out_dir)
     data_dir = os.path.join(out_dir, 'data')
     os.makedirs(data_dir, exist_ok=True)
+    if itrial is None:
+        itrial = next_trial(out_dir, tile)
 
     # 목표: 각도면 (x, y) 로 바꿔 표준 target json 으로 저장
     xp, yp, kind = read_targets(target_file)
@@ -408,7 +425,9 @@ def measure(target_file, fiber_image, fid_images=(), out_dir='./lab_out', tile='
         except OSError:
             shutil.copy2(src, dst)
 
-    itrial = 1
+    if itrial == 1:
+        from kspec_metrology.analysis.mtlcal import save_initial_angles
+        save_initial_angles(out_dir, tile, tfile, use_measured=use_measured)   # trial 0 = 목표 각도
     head = naming.image_head(tile, itrial)
     place(fiber_image, image_path(data_dir, head, 0))
     fid_heads = []
@@ -426,7 +445,7 @@ def measure(target_file, fiber_image, fid_images=(), out_dir='./lab_out', tile='
     dx, dy, angle_rot, angle_cum = mtlcal(data_dir=data_dir, head=head, nexposure=1,
                                           fid_head=fid_heads or None, target_file=tfile,
                                           json_dir=out_dir, target_name=tile, itrial=itrial, **params)
-    return dict(ids=_all_ids(), nfib=xp.size, dx=dx, dy=dy, angle_rot=angle_rot, angle_cum=angle_cum,
+    return dict(itrial=itrial, ids=_all_ids(), nfib=xp.size, dx=dx, dy=dy, angle_rot=angle_rot, angle_cum=angle_cum,
                 json=naming.json_path(out_dir, tile, itrial), offsets=naming.offset_path(out_dir, tile, itrial),
                 data_dir=data_dir, head=head, fid_heads=fid_heads, target_file=tfile, params=params)
 
@@ -434,6 +453,21 @@ def measure(target_file, fiber_image, fid_images=(), out_dir='./lab_out', tile='
 def show_steps(res, n=8):
     """measure 의 결과를 단계별 그림으로: fiducial 검출(세트별), fiber 매칭, 초점면 잔차."""
     return _inspect(res['data_dir'], res['head'], res['fid_heads'], res['target_file'], n=n, **res['params'])
+
+
+def history(out_dir, tile):
+    """out_dir 의 trial 별 offset 표를 읽어 fiber 오차의 최대/중앙값 [um] 표로 (pandas DataFrame)."""
+    import pandas as pd
+    rows = []
+    for k in range(1, next_trial(out_dir, tile)):
+        f = naming.offset_path(out_dir, tile, k)
+        if not os.path.exists(f):
+            continue
+        d = np.loadtxt(f, usecols=(1, 2), ndmin=2)
+        r = np.hypot(d[:, 0], d[:, 1]); r = r[np.isfinite(r)]
+        rows.append(dict(trial=k, err_max_um=r.max(), err_median_um=np.median(r),
+                         json=os.path.basename(naming.json_path(out_dir, tile, k))))
+    return pd.DataFrame(rows).set_index('trial')
 
 
 def offsets_table(res):

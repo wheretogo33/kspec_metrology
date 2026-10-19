@@ -45,6 +45,13 @@ LabTest_README.md            이 파일
 **끊어진 fiber**: 노트북 1절의 `BROKEN_FIBERS = ['C4']` 처럼 ID 를 적는다. 표와
 목표 파일은 그대로 두고 그 fiber 만 이미지에서 찾지 않는다 (결과는 NaN / 회전량 0).
 
+## 반복 측정 (positioner 를 옮긴 뒤)
+
+같은 `OUT_DIR`/`TILE` 로 `lab.measure(..., itrial=None)` 를 다시 부르면 다음 trial
+번호가 되고, 누적 각도 = 직전 trial json + 이번 회전량 으로 쌓인다
+(`_0.json` = 목표 각도). 노트북 5절. `lab.history(OUT_DIR, TILE)` 가 trial 별
+오차를 표로 보여 준다.
+
 ## 출력 (`OUT_DIR`)
 
 - `{TILE}_MetrologyTrial_1_offset.txt` — fiber 별 남은 위치 오차 dx, dy [µm] 와 회전량 dalpha, dbeta [deg]
