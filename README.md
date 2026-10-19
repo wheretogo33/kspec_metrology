@@ -214,12 +214,20 @@ fiber 가 끊어져 불이 안 들어오면 표와 target 파일, json key 순�
 그 fiber 만 제외한다 (positioner 는 그대로 꽂혀 있으므로 표에서 지우면 target
 파일과 json 순서가 다 바뀐다).
 
+가장 간단한 방법은 `analysis/fiber_config.py` 의 한 줄이다.
+
+```python
+FIBER_EXCLUDE = ['C4', 'D2']                  # 끊어진 fiber 의 홀 ID
+```
+
+코드를 안 고치려면 환경변수로도 된다 (환경변수가 있으면 그것이 우선).
+
 ```bash
 KSPEC_FIBER_EXCLUDE="C4,D2" python ...        # 환경변수
 ```
 ```python
 from kspec_metrology.analysis import fiber_config as cfg
-cfg.FIBER_EXCLUDE = ('C4', 'D2')              # import 뒤에 바꿔도 된다
+cfg.FIBER_EXCLUDE = ['C4', 'D2']              # import 뒤에 바꿔도 된다
 ```
 
 제외된 fiber 는 이미지에서 찾지 않고(검출 기대 개수가 줄어든다) 매칭에서 빠진다.

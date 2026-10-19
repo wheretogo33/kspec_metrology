@@ -328,10 +328,13 @@ FIDUCIAL_EXCLUDE = ()
 # (positioner 는 그대로 꽂혀 있다) 이미지에서 찾지 않고 매칭에서 뺀다. 그 fiber 의
 # 위치 오차는 NaN, 회전량은 0 으로 나온다 (누적 각도는 직전 값 유지).
 #   환경변수 : KSPEC_FIBER_EXCLUDE="C4,D2"
-#   코드     : fiber_config.FIBER_EXCLUDE = ('C4', 'D2')   (import 뒤에 바꿔도 된다)
+#   파일     : 아래 FIBER_EXCLUDE = [...] 한 줄 (또는 import 뒤 fiber_config.FIBER_EXCLUDE = [...])
+FIBER_EXCLUDE = []                       # <- 끊어진 fiber 의 홀 ID 를 여기에 적는다. 예: ['C4', 'D2']
+
 FIBER_EXCLUDE_ENV = 'KSPEC_FIBER_EXCLUDE'
-FIBER_EXCLUDE = tuple(t.strip() for t in
-                      os.environ.get(FIBER_EXCLUDE_ENV, '').replace(';', ',').split(',') if t.strip())
+if os.environ.get(FIBER_EXCLUDE_ENV, '').strip():      # 환경변수가 있으면 그것이 우선
+    FIBER_EXCLUDE = [t.strip() for t in
+                     os.environ[FIBER_EXCLUDE_ENV].replace(';', ',').split(',') if t.strip()]
 
 
 def dead_mask():
