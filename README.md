@@ -346,6 +346,18 @@ run = MetrologyRun(target_file=..., data_dir=..., json_dir=...,
 INFO Distortion fit (radial, 6 coefficients, 30 fiducials): fiducial residual rms 10.8 um, max 20.2 um; magnification -8.4915
 ```
 
+#### 인터넷이 없는 실험실 컴퓨터로 가져가기
+
+```bash
+python -m kspec_metrology.make_labtest_bundle --out dist/kspec_metrology_LabTest.zip
+```
+
+패키지를 `kspec_metrology_LabTest` 라는 이름으로 (import 문까지 바꿔서) 복사하고
+노트북 `LabTest_Metrology.ipynb`, `LabTest_README.md` 와 함께 zip 으로 묶는다.
+그 컴퓨터에 깔린 옛 `kspec_metrology` 와 섞이지 않는다. 풀어서 노트북 첫 셀의
+경로만 맞추면 되고 설치는 필요 없다. 실험실용 도우미(목표 파일 변환, fiber 표
+줄이기, 단계별 확인 그림)는 `kspec_metrology/lab.py` 에 있다.
+
 ### 카메라 배율
 
 `analysis/utils.py` 의 `CAMERA2FOCAL_M` 이 camera -> focal 배율 초기값이다.

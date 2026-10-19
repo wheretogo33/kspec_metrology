@@ -103,7 +103,8 @@ def load_configuration(target_file=None, apply_zenith_offset=True,
             xorigin[k], yorigin[k] = m['x'], m['y']
             nhit += 1
 
-        unknown = [h for h in measured if h not in set(pick_ids)]
+        unknown = [h for h, m in measured.items() if h not in set(pick_ids)
+                   and (m['x'] is not None or m['arm1'] is not None)]
         log.info("Measured geometry %s: %d/%d holes replaced",
                  cfg.MEASURED_GEOMETRY_PATH, nhit, len(pick_ids))
         if unknown:
@@ -360,7 +361,7 @@ def measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, max_dist=None, 
     목표 위치에 가장 가까운 것을 그 fiber 로 본다. x, y 는 fiber + fiducial 전체
     목표 (fiducial 은 그 자리의 검출을 fiber 로 잘못 잡지 않게 하려고 넣는다).
 
-    반환: xfocal, yfocal (x, y 순서), dist (매칭 거리 [mm])
+    반환: xfocal, yfocal (x, y 순서), dist (매칭 거리 [mm]), (xobs, yobs) (같은 순서의 칩 좌표)
     """
     log = get_logger()
     nfid = x.size - nfib
@@ -376,7 +377,7 @@ def measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, max_dist=None, 
                     int((dist[:nfib] > max_dist).sum()), max_dist, dist[:nfib].max())
     log.info("Fiber image (%s): %d peaks; fiber-target distance median %.1f um, max %.1f um",
              head, xobs.size, np.median(dist[:nfib])*1e3, dist[:nfib].max()*1e3)
-    return xf[j], yf[j], dist
+    return xf[j], yf[j], dist, (xobs[j], yobs[j])
 
 
 def mtlcal(data_dir='./MTL/data/'
@@ -499,7 +500,7 @@ def mtlcal(data_dir='./MTL/data/'
             np.arange(x_fid.size), theta_guess, xoff_guess, yoff_guess,
             model=model, m_init=magnification)
 
-        xfocal, yfocal, _ = measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, **pk)
+        xfocal, yfocal, _, _ = measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, **pk)
         xfocal[fid_flag], yfocal[fid_flag] = xf_fid, yf_fid     # fiducial 은 전용 노출 값
         dx, dy = xfocal-x, yfocal-y
 
