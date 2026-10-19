@@ -21,7 +21,7 @@ def main():
         except ImportError:
             print(f"  {name:15s} 없음" + ("  <- 필수" if minver else "  <- 노트북/표에 필요"))
             ok &= minver is None
-    pkg = __name__.split('.')[0]
+    pkg = os.path.basename(os.path.dirname(os.path.abspath(__file__)))   # -m 으로 돌면 __name__ 이 __main__
     try:
         cfg = importlib.import_module(f'{pkg}.analysis.fiber_config')
         importlib.import_module(f'{pkg}.lab')
@@ -33,7 +33,7 @@ def main():
     except Exception as e:
         ok = False
         print(f"\n[!] {pkg} import 실패: {e!r}")
-    print("\n결과:", "사용 가능" if ok else "필수 패키지가 빠져 있다")
+    print("\n결과:", "사용 가능" if ok else "쓸 수 없다 (위 [!] 참고)")
     return 0 if ok else 1
 
 
