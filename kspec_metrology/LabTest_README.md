@@ -63,7 +63,7 @@ LabTest_README.md            이 파일
 ```python
 from kspec_metrology_LabTest import lab
 res = lab.measure(target_file, fiber_image, [fid1, fid2], out_dir='lab_out',
-                  magnification=8.40, n_extra=9)
+                  magnification=8.40, model='radial+affine', n_extra=9)
 lab.offsets_table(res)      # fiber 별 표
 lab.show_steps(res)         # 단계별 그림
 ```

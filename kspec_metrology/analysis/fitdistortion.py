@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.optimize import curve_fit
 from kspec_metrology.analysis.utils import (transform_polynomial, transform, camera2focal_coeff,
-                                            model_mask, COEFF_NAMES)
+                                            model_mask, full_coeff, COEFF_NAMES)
 from kspec_metrology.logging.log import get_logger
 
 
@@ -12,11 +12,12 @@ def fitdistortion(x, y, fid_flag
     """fiducial 로 camera -> focal 변환 계수를 맞추고 모든 점을 focal 좌표로 옮긴다.
 
     model   : 풀 왜곡 항 (utils.DISTORTION_MODELS 의 이름이나 계수 이름 목록).
-              'full'(기본) 은 15 개 항 전부, 실험실처럼 단순한 광학계에서는 'radial'
-              이나 'similarity' 로 줄인다. 풀지 않는 항은 0 으로 고정된다.
+              'full'(기본) 은 왜곡 15 개 항 전부, 실험실처럼 단순한 광학계에서는 'radial'
+              이나 'similarity' 로 줄인다. '+affine' 이 붙은 모델은 축별 배율 차·전단
+              (plate 기울기) 항 b1, b2 를 더 푼다. 풀지 않는 항은 0 으로 고정된다.
     m_init  : 배율 초기값. None 이면 utils.CAMERA2FOCAL_M.
 
-    반환: xfocal, yfocal, dx, dy, coeff (길이 15 의 전체 계수)
+    반환: xfocal, yfocal, dx, dy, coeff (길이 17 의 전체 계수; 마지막 둘이 affine 항)
     """
     log = get_logger()
 
@@ -33,7 +34,7 @@ def fitdistortion(x, y, fid_flag
         raise ValueError(f"distortion model {model!r} has {nfree} free coefficients but only "
                          f"{nfid} fiducials ({2*nfid} equations); use a simpler model")
 
-    p_full = np.copy(camera2focal_coeff)
+    p_full = full_coeff(camera2focal_coeff)
     p_full[4:][~mask[4:]] = 0.                 # 풀지 않는 왜곡 항은 0 으로 고정
     p_full[1] = theta_guess
     p_full[2] = xoff_guess

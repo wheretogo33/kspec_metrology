@@ -90,7 +90,8 @@ CAMERA2FOCAL_M = -8.467529447775467
 COEFF_NAMES = ('m', 'theta', 'x0', 'y0',
                'r1', 'r2', 'r3', 'r4',          # radial   r^2 .. r^8
                't1', 't2', 't3',                # tangential
-               'a1', 'a2', 'a4', 'a3')          # PSF 비대칭(coma)으로 생기는 centroid 이동 항
+               'a1', 'a2', 'a4', 'a3',          # PSF 비대칭(coma)으로 생기는 centroid 이동 항
+               'b1', 'b2')                      # affine 비등방 항 (b1+i b2)*conj(w): 축별 배율 차, 전단
 
 # 왜곡 모델. 광학계가 단순하거나 fiducial 이 적을 때 풀 항을 줄인다.
 # 풀지 않는 항은 0 으로 고정되고, 쓰려면 fiducial 이 (항 수 / 2) 개 이상 있어야 한다.
@@ -98,11 +99,17 @@ COEFF_NAMES = ('m', 'theta', 'x0', 'y0',
 #   optics      PSF 항 없이 광학 왜곡만 (11 개). PSF 가 대칭에 가까울 때
 #   radial      배율 · 회전 · offset + r^2, r^4 (6 개). 렌즈가 적은 실험실 광학계
 #   similarity  배율 · 회전 · offset 만 (4 개). 왜곡을 무시해도 될 때
+#   +affine     위 모델에 b1, b2 를 더한 것. plate 가 카메라 축에 기울어 있거나(한쪽 축 축소)
+#               전단이 있을 때 필요하다. 실험실 영상(2026-10-19)에서 잔차 108 -> 61 um.
 DISTORTION_MODELS = {
-    'full': COEFF_NAMES,
+    'full': COEFF_NAMES[:15],
     'optics': COEFF_NAMES[:11],
     'radial': ('m', 'theta', 'x0', 'y0', 'r1', 'r2'),
     'similarity': ('m', 'theta', 'x0', 'y0'),
+    'full+affine': COEFF_NAMES,
+    'optics+affine': COEFF_NAMES[:11] + ('b1', 'b2'),
+    'radial+affine': ('m', 'theta', 'x0', 'y0', 'r1', 'r2', 'b1', 'b2'),
+    'affine': ('m', 'theta', 'x0', 'y0', 'b1', 'b2'),
 }
 
 
@@ -122,6 +129,16 @@ def model_mask(model):
         if n not in names:
             raise ValueError(f"'{n}' must always be free (it is a pose term, not distortion)")
     return np.array([n in names for n in COEFF_NAMES])
+
+
+def full_coeff(coeff):
+    """길이 15 (affine 항 없음) 또는 17 의 계수 배열 -> 길이 17 (b1, b2 는 0 으로 채움)."""
+    coeff = np.asarray(coeff, float)
+    if coeff.size == len(COEFF_NAMES):
+        return coeff
+    if coeff.size == len(COEFF_NAMES) - 2:
+        return np.r_[coeff, 0., 0.]
+    raise ValueError(f"coefficient array must have {len(COEFF_NAMES)-2} or {len(COEFF_NAMES)} entries")
 
 
 camera2focal_coeff = np.array([CAMERA2FOCAL_M, 3.39, -17.6, 6.12
@@ -212,6 +229,7 @@ def _transform_core(xtemp, ytemp
                , r1x, r2x, r3x, r4x
                , t1x, t2x, t3x
                , a1x, a2y, a4x, a3y
+               , b1=0., b2=0.
                ):
     """왜곡 다항식 본체. (x, y) 배열을 받아 (xnew-x0, ynew-y0)를 돌려준다.
 
@@ -222,6 +240,9 @@ def _transform_core(xtemp, ytemp
       - Zernike 항 Z20, Z10 은 (x+iy)^5, (x+iy)^3 의 실수부이고
         Z21, Z9 는 각각의 허수부다 (zernike() 참고). 복소 거듭제곱을
         곱셈 연쇄로 한 번만 만들어 네 항이 나눠 쓴다.
+      - affine 항 (b1 + i b2) * (x - iy) = (b1 x + b2 y) + i (b2 x - b1 y):
+        회전·등방 배율(m, theta)이 못 담는 축별 배율 차와 전단. 기본 0 이라 예전
+        15개 계수 배열을 그대로 넘겨도 결과가 같다.
     """
 
     cos_t, sin_t = np.cos(theta), np.sin(theta)
@@ -243,11 +264,13 @@ def _transform_core(xtemp, ytemp
     xnew = (x + x*rad_poly + (t1x*(s + 2.*x2) + (t2x*2.)*xy)*tan_scale
             + a1x*w5.real
             + a4x*w3.real
+            + b1*x + b2*y
             )
 
     ynew = (y + y*rad_poly + (t2x*(s + 2.*y2) + (t1x*2.)*xy)*tan_scale
             + a2y*w5.imag
             + a3y*w3.imag
+            + b2*x - b1*y
             )
 
     return xnew - x0, ynew - y0
@@ -260,9 +283,10 @@ def transform_polynomial(xin
                , r1x, r2x, r3x, r4x
                , t1x, t2x, t3x
                , a1x, a2y, a4x, a3y
+               , b1=0., b2=0.
                ):
     """curve_fit용 wrapper. x, y가 두 번 반복된 배열을 받아 결과를 이어붙여 돌려준다.
-    (curve_fit이 파라미터 개수를 signature에서 읽으므로 인자를 풀어서 적어 둔다.)"""
+    (curve_fit이 파라미터 개수를 signature 또는 p0 에서 읽으므로 인자를 풀어서 적어 둔다.)"""
 
     xtemp, ytemp = xin
     xnew, ynew = _transform_core(xtemp[:xtemp.size//2], ytemp[:ytemp.size//2]
@@ -270,6 +294,7 @@ def transform_polynomial(xin
                         , r1x, r2x, r3x, r4x
                         , t1x, t2x, t3x
                         , a1x, a2y, a4x, a3y
+                        , b1, b2
                         )
 
     return np.concatenate((xnew, ynew))

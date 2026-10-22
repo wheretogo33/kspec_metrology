@@ -353,7 +353,7 @@ run = MetrologyRun(..., exptime=2.0e-3, fid_exptime=[0.5e-3, 2.0e-3])
 | 인자 | 뜻 |
 |---|---|
 | `magnification` | camera → focal 배율 초기값 (부호 포함; 본 장비는 `utils.CAMERA2FOCAL_M` ≈ −8.47). fiber 매칭은 이 값으로 투영해서 하므로 몇 % 안으로 맞아야 한다. 대략 `초점면 거리 / (픽셀 거리 × 3.76e-3)` 로 한 번 재서 넣는다 |
-| `model` | 왜곡 다항식에서 풀 항. `'full'` (15개, 본 장비) / `'optics'` (PSF 항 없이 11개) / `'radial'` (배율·회전·offset + r², r⁴, 6개) / `'similarity'` (배율·회전·offset, 4개). fiducial 이 `항 수 / 2` 개 이상 있어야 한다 |
+| `model` | 왜곡 다항식에서 풀 항. `'full'` (15개, 본 장비) / `'optics'` (PSF 항 없이 11개) / `'radial'` (배율·회전·offset + r², r⁴, 6개) / `'similarity'` (배율·회전·offset, 4개). 이름 뒤에 `+affine` 을 붙이면 축별 배율 차·전단 항 2개(b1, b2)를 더 푼다 (plate 가 카메라 축에 기울어 있을 때 필요). fiducial 이 `항 수 / 2` 개 이상 있어야 하고, 30개로는 항이 많을수록 과적합이 난다 (아래) |
 
 ```python
 run = MetrologyRun(target_file=..., data_dir=..., json_dir=...,
@@ -364,7 +364,20 @@ run = MetrologyRun(target_file=..., data_dir=..., json_dir=...,
 
 `nwindow` (무게중심 창 반폭) 와 `threshold` 는 그 광학계의 PSF 크기와 밝기에
 맞춘다 (아래 "peak 측정 창" 참고). 어떤 모델을 썼고 fiducial 잔차가 얼마인지는
-로그에 남는다. 참고로 본 장비 mock 에서는 `optics` 와 `radial` 이 `full` 과
+로그에 남는다.
+
+모델은 **fit 잔차가 아니라 leave-one-out 잔차**(fiducial 하나를 빼고 맞춰 그
+fiducial 을 예측한 오차)로 고른다. fiducial 30개에 15–17개 항을 풀면 잔차는
+줄지만 예측은 나빠진다. 실측값으로 본 예:
+
+| 자료 (fiducial 30개) | affine (6) | radial+affine (8) | optics+affine (13) | full (15) | full+affine (17) |
+|---|---|---|---|---|---|
+| 본 장비 2026-10-17, 핀홀 edge 위치 | 64 | 36 | **11** | 15 | **9** |
+| 실험실 2026-10-19, 무게중심 | **78** | **78** | 92 | 159 | 104 |
+
+(leave-one-out rms, µm). 본 장비에서는 `full+affine` 또는 `optics+affine`,
+렌즈가 빠진 실험실에서는 `radial+affine` 이 맞았다. affine 항은 plate 기울기
+1.3°(본 장비) / 약 3°(실험실)에 해당하는 축별 배율 차를 받는다. 참고로 본 장비 mock 에서는 `optics` 와 `radial` 이 `full` 과
 거의 같은 fiber 오차를 내지만 `similarity` 는 1 mm 가까이 틀린다 — 그 광학계의
 왜곡이 어느 정도인지 fiducial 잔차로 확인하고 모델을 고른다.
 
