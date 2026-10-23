@@ -45,12 +45,29 @@ LabTest_README.md            이 파일
 **끊어진 fiber**: 노트북 1절의 `BROKEN_FIBERS = ['C4']` 처럼 ID 를 적는다. 표와
 목표 파일은 그대로 두고 그 fiber 만 이미지에서 찾지 않는다 (결과는 NaN / 회전량 0).
 
+**각도 부호**: 노트북 1절의 `ANGLE_SIGN`. 출력 각도 = 부호 × 계산각. 본 장비 규약은
+`(-1, -1)`; 2026-10-23 실험실 positioner 는 beta 부호가 반대라 `(-1, 1)` 이 맞았다
+(beta = 150 으로 보낸 fiber 가 `(-1, -1)` 규약의 beta = -150 자리에 있었다). 틀리면
+fiber 가 목표에서 수 mm 떨어져 나온다 (`fiber - target` 중앙값이 mm 단위).
+
+**포화**: fiducial 전용 노출에서 안 보이는 fiducial 은 fiber 노출(보통 포화)에서라도
+가져온다. 포화된 것은 로그에 `saturated ... (used anyway)` 로 남는다. 촬영을 직접 하는
+`MetrologyRun` 에는 `auto_exposure=True` 로 포화 시 노출을 줄여 다시 찍는 옵션이 있다.
+
+**검출 점검**: `lab.check_peaks(fits, threshold, min_dist, finder_opts)` 로 이미지 한 장의
+검출 개수·밝기·쪼개짐을 먼저 본다 (노트북 2절 뒤). `THRESHOLD` 는 시작값이고 본
+패키지처럼 검출 개수가 기대 범위에 들도록 자동으로 올리고 내린다.
+
+**목표 파일 만들기**: `lab.make_target(path, angles=(30, 150))` (모두 같은 각도),
+`offset=(dx, dy)` (회전 중심에서 같은 offset), `xy=(xp, yp)` (개별).
+
 ## 반복 측정 (positioner 를 옮긴 뒤)
 
 같은 `OUT_DIR`/`TILE` 로 `lab.measure(..., itrial=None)` 를 다시 부르면 다음 trial
 번호가 되고, 누적 각도 = 직전 trial json + 이번 회전량 으로 쌓인다
 (`_0.json` = 목표 각도). 노트북 5절. `lab.history(OUT_DIR, TILE)` 가 trial 별
-오차를 표로 보여 준다.
+오차를 표로 보여 준다. 같은 이미지로 **다시 계산만** 하려면 `itrial=1` 을 명시한다
+(그러지 않으면 다음 trial 번호로 쌓인다).
 
 ## 출력 (`OUT_DIR`)
 

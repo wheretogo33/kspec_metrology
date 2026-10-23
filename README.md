@@ -208,6 +208,25 @@ INFO Measured geometry /경로/Measured_Geometry.txt: 2/103 holes replaced
 실측 위치를 적은 fiducial 에는 핀홀 오프셋을 **더하지 않는다** (이중 계산이
 되므로). 위치를 아직 안 잰 fiducial 에만 오프셋이 적용된다.
 
+### 각도 부호와 positioner 규약
+
+출력 각도 = `fiber_config.ANGLE_SIGN` × 계산각 (alpha, beta). 기본 `(-1, -1)`
+(= 예전의 "출력 각도 = -계산각"). 2026-10-23 실험실 positioner 는 beta 부호가
+반대였다 (beta = 150 으로 보낸 fiber 가 기본 규약의 beta = -150 자리에 있었다).
+그 경우 `KSPEC_ANGLE_SIGN="-1,1"` 또는 `fiber_config.ANGLE_SIGN = (-1., 1.)`.
+부호가 틀리면 fiber 가 목표에서 수 mm 떨어져 나오고 매칭이 겹친다. 본 장비
+positioner 의 규약은 첫 측정에서 `fiber - target` 거리로 확인할 것.
+
+### 포화와 노출 자동 조정
+
+`MetrologyRun(..., auto_exposure=True)` 면 찍은 이미지에 포화 화소가
+`sat_max_pixels`(기본 0) 보다 많을 때 노출을 `exposure_factor`(0.5) 배로 줄여 다시
+찍는다 (최대 `max_retry` 번; fiber 노출과 fiducial 세트 각각). 줄인 노출은 다음
+trial 에도 쓴다. 분석 쪽에서는 fiducial 전용 노출에 안 보이는 fiducial 을 fiber
+노출(포화되어 있어도)에서 가져오고(`fid_fallback_fiber`, 기본 True), 세트가
+fiducial 을 일부만 담아도 된다 (가장 잘 맞은 세트의 affine 변환으로 다른 세트에서
+다시 붙인다).
+
 ### 끊어진 fiber
 
 fiber 가 끊어져 불이 안 들어오면 표와 target 파일, json key 순서는 그대로 두고

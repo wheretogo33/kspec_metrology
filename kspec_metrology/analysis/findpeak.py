@@ -87,8 +87,12 @@ def findpeak(npeaks
     xchip = (np.arange(nx) - (nx-1)/2.)*3.76e-3
     ychip = (np.arange(ny) - (ny-1)/2.)*3.76e-3
 
-    # 포화 판정은 배경을 빼기 전 값 기준이므로, 뺄 배경 수준을 대략 기억해 둔다
-    raw_level = float(np.median(im[::16, ::16]))
+    # 포화 판정은 배경을 빼기 전 값 기준이므로, 뺄 배경 수준을 대략 기억해 둔다.
+    # 배경 잡음도 재 둔다: 문턱값 탐색이 잡음 속으로 내려가지 않게 하는 바닥이 된다.
+    sample = im[::16, ::16]
+    raw_level = float(np.median(sample))
+    raw_noise = float(1.4826*np.median(np.abs(sample - raw_level)))
+    threshold_floor = raw_level*(0 if (background and background != 'crop') else 1) + 5.*raw_noise
 
     if isinstance(npeaks, (tuple, list)):
         nmin, nmax = int(npeaks[0]), int(npeaks[1])
@@ -166,8 +170,15 @@ def findpeak(npeaks
                 threshold_temp *= 1.1
             else:
                 threshold_temp *= 0.9
-        else:
-            # 상한까지 못 맞췄다. 가장 가까웠던 시도를 쓴다.
+            if threshold_temp < threshold_floor:
+                # 배경 잡음(5 sigma) 아래로는 내려가지 않는다: 잡음을 peak 으로 세기 시작하고
+                # sep 의 pixel stack 이 넘친다. 여기서 끊고 가장 가까웠던 시도를 쓴다.
+                log.warning("Threshold would drop below the noise floor (%.0f = background %.0f + 5 sigma); "
+                            "stopping the search -- the image has fewer spots than expected",
+                            threshold_floor, raw_level)
+                break
+        if miss(nfound) != 0:
+            # 못 맞췄다. 가장 가까웠던 시도를 쓴다.
             _, peak_table, threshold_temp = best
             nfound = len(peak_table)
             log.warning("Could not reach %s peaks in %d iterations; "
@@ -177,9 +188,10 @@ def findpeak(npeaks
 
             if nfound < nmin:
                 raise RuntimeError(
-                    f"Only {nfound} peaks found but {nmin} expected. "
-                    "Lower `threshold`, or check the image and the fiber "
-                    "configuration (fiber_config.FIBERS).")
+                    f"Only {nfound} peaks found but {nmin} expected (threshold searched down to "
+                    f"{threshold_temp:.0f}, noise floor {threshold_floor:.0f}). "
+                    "Some spots are missing or too faint: check the image (lab.check_peaks), "
+                    "the exposure, FIBER_EXCLUDE for dead fibers, and the fiber table.")
 
             # 남는 것은 가장 어두운 쪽부터 버린다 (cosmic ray / hot pixel로 본다)
             order = np.argsort(-np.asarray(peak_table['peak_value'], dtype=float))

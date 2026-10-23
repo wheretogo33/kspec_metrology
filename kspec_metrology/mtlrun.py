@@ -122,6 +122,9 @@ class MetrologyRun:
         fid_min_peak : fiducial 노출을 고를 때 이보다 어두운 검출은 피한다 [ADU]
         n_extra     : 표에 없는데 이미지에 보이는 밝은 점의 수 (고정 sky fiber 등)
         min_dist    : 가까운 검출을 하나로 합치는 거리 [px] (findpeak 참고)
+        auto_exposure : 찍은 이미지에 포화 화소가 sat_max_pixels 보다 많으면 노출을
+                      exposure_factor 배로 줄여 다시 찍는다 (최대 max_retry 번). 줄인 노출은
+                      다음 trial 에도 그대로 쓴다. fiber 노출과 fiducial 세트 각각에 적용
         tile        : 파일 이름에 쓸 타일 이름. None이면 target 파일에서 읽는다
     """
 
@@ -156,6 +159,10 @@ class MetrologyRun:
                  , fid_min_peak=0.
                  , n_extra=0
                  , min_dist=40
+                 , auto_exposure=False
+                 , sat_max_pixels=0
+                 , exposure_factor=0.5
+                 , max_retry=3
                  , tile=None):
 
         if metric not in ('max', 'median'):
@@ -203,6 +210,10 @@ class MetrologyRun:
         self.fid_min_peak = fid_min_peak
         self.n_extra = n_extra
         self.min_dist = min_dist
+        self.auto_exposure = auto_exposure
+        self.sat_max_pixels = int(sat_max_pixels)
+        self.exposure_factor = float(exposure_factor)
+        self.max_retry = int(max_retry)
 
         self.nfib = len(cfg.fiber_ids())
 
@@ -260,22 +271,37 @@ class MetrologyRun:
 
         return self.json_path(0)
 
+    def _expose_set(self, head, nexposure, exptime, header):
+        """한 세트를 찍는다. auto_exposure 면 포화를 보고 노출을 줄여 다시 찍는다.
+        반환: (경로들, 실제로 쓴 노출시간)"""
+        from astropy.io import fits
+        for attempt in range(self.max_retry + 1):
+            cam = dict(self.camera, exptime=exptime)
+            paths = mtlexp(data_dir=self.data_dir, head=head, nexposure=nexposure,
+                           extra_header=header, **cam)
+            if not self.auto_exposure:
+                return paths, exptime
+            nsat = max(int((fits.getdata(p) >= self.sat_level).sum()) for p in paths)
+            if nsat <= self.sat_max_pixels or attempt == self.max_retry:
+                if nsat > self.sat_max_pixels:
+                    self.log.warning("%s: still %d saturated pixel(s) at %.4g s after %d retries",
+                                     head, nsat, exptime, attempt)
+                return paths, exptime
+            self.log.info("%s: %d saturated pixel(s) at %.4g s -> re-exposing at %.4g s",
+                          head, nsat, exptime, exptime*self.exposure_factor)
+            exptime *= self.exposure_factor
+        return paths, exptime
+
     def expose(self, itrial):
         """이 trial의 이미지를 찍는다. fiber 노출 뒤에 fiducial 전용 세트를 이어 찍는다."""
         header = {'TILE': (self.tile, 'metrology tile'),
                   'MTLTRIAL': (itrial, 'metrology trial number')}
-        paths = mtlexp(data_dir=self.data_dir
-                       , head=self.image_head(itrial)
-                       , nexposure=self.nexposure
-                       , extra_header=header
-                       , **self.camera)
+        paths, self.camera['exptime'] = self._expose_set(
+            self.image_head(itrial), self.nexposure, self.camera['exptime'], header)
         for k, (head, texp) in enumerate(zip(self.fid_image_heads(itrial), self.fid_exptimes)):
-            cam = dict(self.camera, exptime=texp)
-            paths += mtlexp(data_dir=self.data_dir
-                            , head=head
-                            , nexposure=self.fid_nexposure
-                            , extra_header=dict(header, FIDSET=(k, 'fiducial exposure set'))
-                            , **cam)
+            p, self.fid_exptimes[k] = self._expose_set(
+                head, self.fid_nexposure, texp, dict(header, FIDSET=(k, 'fiducial exposure set')))
+            paths += p
         return paths
 
     def analyze(self, itrial):

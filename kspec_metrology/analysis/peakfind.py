@@ -97,6 +97,7 @@ def _daofind(im, threshold, fwhm=8.0, **kw):
 def _sep_extract(im, threshold, minarea=5, **kw):
     """sep.extract. 가장 빠르다. float32 C-contiguous 배열을 요구한다."""
     import sep
+    sep.set_extract_pixstack(int(kw.pop('pixstack', 10_000_000)))   # 큰 spot / 낮은 문턱에서 기본 30만은 넘친다
     data = np.ascontiguousarray(im, dtype=np.float32)
     obj = sep.extract(data, thresh=float(threshold), minarea=minarea, **kw)
     if len(obj) == 0:

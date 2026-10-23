@@ -347,6 +347,17 @@ def dead_mask():
     return np.array([i in FIBER_EXCLUDE for i in ids], dtype=bool)
 
 # find_angle_double_method2_select_elbow에 넘기는 자세 정의
+# 출력 각도의 부호 (alpha, beta). json / target 파일의 각도 = 부호 x 계산각(theta, phi).
+# 본 장비 규약은 (-1, -1). 실험실 positioner(2026-10-23)는 beta 부호가 반대였다
+# (beta=150 으로 보낸 fiber 가 패키지 규약의 beta=-150 자리에 있었다). 그 경우
+# KSPEC_ANGLE_SIGN="-1,1" 또는 fiber_config.ANGLE_SIGN = (-1., 1.) 로 둔다.
+ANGLE_SIGN_ENV = 'KSPEC_ANGLE_SIGN'
+ANGLE_SIGN = (-1., -1.)
+if os.environ.get(ANGLE_SIGN_ENV, '').strip():
+    ANGLE_SIGN = tuple(float(t) for t in os.environ[ANGLE_SIGN_ENV].replace(';', ',').split(','))
+    if len(ANGLE_SIGN) != 2 or any(abs(v) != 1. for v in ANGLE_SIGN):
+        raise ValueError(f"{ANGLE_SIGN_ENV} must be two values of +1/-1, e.g. '-1,1'")
+
 ELBOW = "down"
 CLOCKWISE = False
 

@@ -8,7 +8,8 @@ from scipy.spatial import cKDTree
 from kspec_metrology.analysis.findpeak import findpeak
 from kspec_metrology.analysis.matchfiber import matchfiber
 from kspec_metrology.analysis.fitdistortion import fitdistortion
-from kspec_metrology.analysis.utils import find_angle_double_method2_select_elbow, transform
+from kspec_metrology.analysis.utils import (find_angle_double_method2_select_elbow, transform,
+                                            camera2focal_coeff)
 from kspec_metrology.analysis.zenith_offset import zenith_offset
 from kspec_metrology.analysis.target_info import read_target, zenith_angle
 from kspec_metrology.analysis import fiber_config as cfg
@@ -217,11 +218,13 @@ def _wrap(theta, phi):
 def _flatten_angles(theta, phi):
     """fiber 순서의 (theta, phi)를 (alpha, beta)가 번갈아 놓인 degree 배열로 편다.
 
-    출력 부호는 positioner 제어 규약에 맞춰 뒤집는다 (출력 각도 = -계산각).
+    출력 부호는 positioner 제어 규약에 맞춘다 (출력 각도 = fiber_config.ANGLE_SIGN x 계산각;
+    기본 (-1, -1) 즉 -계산각).
     """
+    sa, sb = cfg.ANGLE_SIGN
     angles = np.empty(2*theta.size)
-    angles[0::2] = -theta*rtod
-    angles[1::2] = -phi*rtod
+    angles[0::2] = sa*theta*rtod
+    angles[1::2] = sb*phi*rtod
 
     return angles
 
@@ -301,7 +304,8 @@ def save_offsets(json_dir, target_name, itrial, dx, dy, angle_rot, nfib):
 
 
 def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
-                      m_init=None, sat_level=65000., fid_min_peak=0., n_extra=0, exclude=None, **pk):
+                      m_init=None, sat_level=65000., fid_min_peak=0., n_extra=0, exclude=None,
+                      set_nexposure=None, match_tol=1.5, fallback=None, **pk):
     """fiducial 전용 노출 세트들에서 fiducial 의 카메라 좌표를 잰다.
 
     x, y 는 fiber 목표 + fiducial 설계 위치 전체, fid_flag 는 그중 fiducial.
@@ -315,41 +319,130 @@ def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
 
     exclude : (xchip, ychip) 이미 아는 fiber 의 칩 좌표. 주면 그 자리를 지우고 찾는다
               (findpeak 의 exclude). 그러면 fiducial 수만 기대한다.
+    set_nexposure : 세트마다 다른 장수 (리스트). None 이면 모두 nexposure.
+    fallback : 세트별 bool 리스트. True 인 세트(예: fiducial 이 같이 찍힌 fiber 노출)는 다른
+              세트에서 못 찾은 fiducial 에만 쓴다 (보통 포화 직전이라 뒤로 민다).
+    match_tol : 매칭을 인정하는 거리 [mm, 초점면]. 세트에 fiducial 이 일부만 찍혔으면
+              (너무 어둡거나) 그 세트에서는 없는 것으로 두고 다른 세트에서 가져온다.
+
+    세트가 fiducial 을 다 담지 못해도 된다: 세트마다 찾은 것만 쓰고, fiducial 마다 포화되지
+    않은 것 중 가장 밝은 세트를, 그것도 없으면 포화 화소가 가장 적은 세트를 쓴다. 어느 세트에도
+    없는 fiducial 이 있으면 예외.
 
     반환: xobs, yobs (fiducial 순서), choice (fiducial 마다 고른 세트 번호),
           theta_guess, (xoff, yoff) (마지막 매칭의 초기값; fitdistortion 용)
     """
     log = get_logger()
     nfid, nfib = int(fid_flag.sum()), int((~fid_flag).sum())
+    xf, yf = x[fid_flag], y[fid_flag]
     sets = []
     for k, head in enumerate(fid_heads):
+        nexp = nexposure if set_nexposure is None else set_nexposure[k]
         nmax = nfid + n_extra if exclude is not None else nfid + nfib + n_extra
-        _, xobs, yobs, peak, nsat = findpeak((nfid, nmax), data_dir=data_dir, head=head,
-                                             nexposure=nexposure, sat_level=sat_level,
+        nmin = max(3, nfid//2)                          # 일부가 안 보여도 받아들인다
+        _, xobs, yobs, peak, nsat = findpeak((nmin, nmax), data_dir=data_dir, head=head,
+                                             nexposure=nexp, sat_level=sat_level,
                                              exclude=exclude, ReturnNsat=True, **pk)
         if xobs.size > nfid:
             # fiber 도 보인다: 전체 패턴으로 매칭하고 fiducial 자리만 쓴다
             imatch, theta_guess, (xoff, yoff) = matchfiber(x, y, xobs, yobs, m_init=m_init)
             imatch = imatch[fid_flag]
         else:
-            imatch, theta_guess, (xoff, yoff) = matchfiber(x[fid_flag], y[fid_flag], xobs, yobs,
-                                                           m_init=m_init)
-        if np.unique(imatch).size != nfid:
-            log.warning("Fiducial set %d (%s): %d of %d fiducials matched to the same peak",
-                        k, head, nfid-np.unique(imatch).size, nfid)
+            imatch, theta_guess, (xoff, yoff) = matchfiber(xf, yf, xobs, yobs, m_init=m_init)
+        # 매칭 검사: 변환(배율·회전·offset 만)으로 옮긴 검출이 설계 위치에서 match_tol 안에 있고
+        # 다른 fiducial 과 같은 검출을 쓰지 않아야 "찾았다" 고 본다
+        coeff_s = np.copy(camera2focal_coeff); coeff_s[0] = m_init or coeff_s[0]
+        coeff_s[1], coeff_s[2], coeff_s[3] = theta_guess, xoff, yoff; coeff_s[4:] = 0.   # fitdistortion 과 같은 자리
+        xs, ys = transform(xobs[imatch], yobs[imatch], coeff_s)
+        dist = np.hypot(xs - xf, ys - yf)
+        _, first = np.unique(imatch, return_index=True)
+        unique = np.zeros(nfid, bool); unique[first] = True
+        # 같은 검출을 두 fiducial 이 쓰면 가까운 쪽만 인정
+        for j in np.unique(imatch):
+            same = np.where(imatch == j)[0]
+            if same.size > 1:
+                unique[same] = False; unique[same[np.argmin(dist[same])]] = True
+        found = unique & (dist < match_tol)
         sets.append(dict(x=xobs[imatch], y=yobs[imatch], peak=peak[imatch], nsat=nsat[imatch],
-                         theta=theta_guess, off=(xoff, yoff)))
-        log.info("Fiducial set %d (%s): %d peaks, %d fiducials saturated, peak %.0f..%.0f",
-                 k, head, xobs.size, int((nsat[imatch] > 0).sum()),
-                 peak[imatch].min(), peak[imatch].max())
+                         found=found, theta=theta_guess, off=(xoff, yoff),
+                         all_x=xobs, all_y=yobs, all_peak=peak, all_nsat=nsat))
+        log.info("Fiducial set %d (%s): %d peaks, %d/%d fiducials found, %d saturated, peak %.0f..%.0f",
+                 k, head, xobs.size, int(found.sum()), nfid, int((nsat[imatch][found] > 0).sum()),
+                 peak[imatch][found].min() if found.any() else np.nan,
+                 peak[imatch][found].max() if found.any() else np.nan)
+        if not found.all():
+            log.warning("Fiducial set %d: not found %s", k,
+                        ", ".join(str(i) for i in np.where(~found)[0]))
 
-    choice = np.zeros(nfid, dtype=int)
+    # 패턴 매칭이 일부만 맞은 세트는, 가장 잘 맞은 세트의 변환(배율·회전·offset)으로 fiducial 이
+    # 있을 자리를 예측해 그 근처(match_tol)의 검출을 다시 붙인다. 세트 사이의 카메라 이동은
+    # 몇 px 라 이 방법이 패턴 매칭보다 믿을 만하다 (fiber 가 목표에서 멀리 있는 fiber 노출에서
+    # 특히: 전체 패턴 매칭이 틀어진다).
+    # matchfiber 의 회전·offset 은 격자 탐색값(0.5 deg, 0.5 mm)이라 시야 가장자리에서 1 mm 넘게
+    # 틀릴 수 있다. 가장 잘 맞은 세트의 찾은 쌍으로 변환을 맞춰 (쌍이 적으면 affine 최소제곱,
+    # 많으면 왜곡 모델 radial+affine) 예측 정밀도를 올린 뒤 모든 세트에서 다시 붙인다.
+    # 찾은 수가 늘지 않을 때까지 되풀이한다 (왜곡이 큰 광학계에서는 몇 번 걸린다).
+    def _predict(st, zz_x, zz_y):
+        f = st['found']
+        if f.sum() >= 10:
+            _, _, _, _, cf = fitdistortion(xf[f], yf[f], np.ones(int(f.sum()), bool), st['x'][f], st['y'][f],
+                                           np.arange(int(f.sum())), st['theta'], *st['off'],
+                                           model='radial+affine', m_init=m_init)
+            px, py = transform(st['x'][f], st['y'][f], cf)
+            err = np.hypot(px - xf[f], py - yf[f])
+            return transform(zz_x, zz_y, cf), err
+        z = st['x'][f] + 1j*st['y'][f]; w = xf[f] + 1j*yf[f]
+        A = np.column_stack((z, np.conj(z), np.ones(z.size)))
+        M = np.vstack([np.column_stack([A.real, -A.imag]), np.column_stack([A.imag, A.real])])
+        c, *_ = np.linalg.lstsq(M, np.r_[w.real, w.imag], rcond=None)
+        cc = c[:3] + 1j*c[3:]
+        zz = zz_x + 1j*zz_y
+        p = np.column_stack((zz, np.conj(zz), np.ones(zz.size))) @ cc
+        return (p.real, p.imag), np.abs(A @ cc - w)
+
+    ref = max(range(len(sets)), key=lambda k: int(sets[k]['found'].sum()))
+    if sets[ref]['found'].sum() >= max(3, nfid//3):
+        for _ in range(8):
+            improved = False
+            for k, st in enumerate(sets):
+                (px, py), pred_err = _predict(sets[ref], st['all_x'], st['all_y'])
+                tree = cKDTree(np.column_stack((px, py)))
+                d, j = tree.query(np.column_stack((xf, yf)))
+                found = d < match_tol
+                for jj in np.unique(j[found]):               # 한 검출에 둘 이상 붙으면 가까운 쪽만
+                    same = np.where(found & (j == jj))[0]
+                    if same.size > 1:
+                        found[same] = False; found[same[np.argmin(d[same])]] = True
+                if found.sum() >= st['found'].sum():
+                    if found.sum() > st['found'].sum():
+                        improved = True
+                        log.info("Fiducial set %d: re-matched with set %d's transform "
+                                 "(fit rms %.2f mm): %d -> %d found", k, ref, np.sqrt(np.mean(pred_err**2)),
+                                 int(st['found'].sum()), int(found.sum()))
+                    st.update(x=st['all_x'][j], y=st['all_y'][j], peak=st['all_peak'][j],
+                              nsat=st['all_nsat'][j], found=found)
+            ref = max(range(len(sets)), key=lambda k: int(sets[k]['found'].sum()))
+            if not improved:
+                break
+
+    fallback = [False]*len(sets) if fallback is None else list(fallback)
+    choice = np.full(nfid, -1, dtype=int)
     for i in range(nfid):
-        ok = [k for k, st in enumerate(sets) if st['nsat'][i] == 0 and st['peak'][i] >= fid_min_peak]
+        cand = [k for k, st in enumerate(sets) if st['found'][i] and not fallback[k]]
+        if not cand:
+            cand = [k for k, st in enumerate(sets) if st['found'][i]]
+        if not cand:
+            continue
+        ok = [k for k in cand if sets[k]['nsat'][i] == 0 and sets[k]['peak'][i] >= fid_min_peak]
         if ok:
             choice[i] = max(ok, key=lambda k: sets[k]['peak'][i])
         else:
-            choice[i] = min(range(len(sets)), key=lambda k: (sets[k]['nsat'][i], -sets[k]['peak'][i]))
+            choice[i] = min(cand, key=lambda k: (sets[k]['nsat'][i], -sets[k]['peak'][i]))
+    missing = np.where(choice < 0)[0]
+    if missing.size:
+        raise RuntimeError(f"fiducial {', '.join(str(i) for i in missing)} not found in any set "
+                           f"({len(sets)} set(s)); add an exposure where they are visible "
+                           "(fid_images / fid_exptime) or allow the fiber frame (fid_fallback_fiber)")
     xobs = np.array([sets[choice[i]]['x'][i] for i in range(nfid)])
     yobs = np.array([sets[choice[i]]['y'][i] for i in range(nfid)])
     bad = [i for i in range(nfid) if sets[choice[i]]['nsat'][i] > 0]
@@ -357,10 +450,10 @@ def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
         log.info("Fiducial exposure chosen per fiducial: %s",
                  ", ".join(f"set {k}: {int((choice == k).sum())}" for k in range(len(sets))))
     if bad:
-        log.warning("%d fiducial(s) saturated in every set: %s", len(bad),
+        log.warning("%d fiducial(s) saturated in every set where found (used anyway): %s", len(bad),
                     ", ".join(str(i) for i in bad))
-    last = sets[-1]
-    return xobs, yobs, choice, last['theta'], last['off']
+    best = sets[ref]                                                   # 가장 잘 맞은 세트의 초기값
+    return xobs, yobs, choice, best['theta'], best['off']
 
 
 def measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, max_dist=None, n_extra=0,
@@ -413,6 +506,7 @@ def mtlcal(data_dir='./MTL/data/'
            , n_extra=0
            , cross_exclude=True
            , min_dist=40
+           , fid_fallback_fiber=True
            , target_file=None
            , json_dir=None
            , target_name=None
@@ -438,6 +532,8 @@ def mtlcal(data_dir='./MTL/data/'
     어두운 검출을 피하는 기준이다. n_extra 는 표에 없는데 이미지에 보이는 밝은 점의 수
     (예: 고정된 sky fiber 9개). 그만큼 검출을 더 허용하고 매칭에서 자연히 빠진다.
     min_dist 는 가까운 검출을 하나로 합치는 거리 [px] (findpeak 참고; 큰 PSF 면 80 정도).
+    fid_fallback_fiber (기본 True) 는 fiducial 전용 노출에서 안 보이는 fiducial 을 fiber
+    노출(fiducial 이 같이 켜져 있을 때, 보통 포화)에서라도 가져오는 것이다.
     cross_exclude (기본 True) 는 노출을 나눠 찍었을 때 fiber 노출의 fiducial 자리와
     fiducial 노출의 fiber 자리를 서로 지우고 찾는 것이다 (양쪽 다 켜 놓고 찍은 경우).
 
@@ -519,10 +615,15 @@ def mtlcal(data_dir='./MTL/data/'
         fid_heads = [fid_head] if isinstance(fid_head, str) else list(fid_head)
         fid_nexposure = nexposure if fid_nexposure is None else fid_nexposure
         x_fid, y_fid = x[fid_flag], y[fid_flag]
+        # fiber 노출도 마지막 후보로 (전용 노출에서 안 보이는 fiducial 을 위해; 보통 포화라 뒤로 밀린다)
+        heads_all = fid_heads + ([head] if fid_fallback_fiber else [])
+        nexp_all = [fid_nexposure]*len(fid_heads) + ([nexposure] if fid_fallback_fiber else [])
+
+        fb_all = [False]*len(fid_heads) + ([True] if fid_fallback_fiber else [])
 
         xo_fid, yo_fid, _, theta_guess, (xoff_guess, yoff_guess) = measure_fiducials(
-            fid_heads, xa, ya, fa, data_dir, fid_nexposure, n_extra=n_extra,
-            m_init=magnification, sat_level=sat_level, fid_min_peak=fid_min_peak, **pk)
+            heads_all, xa, ya, fa, data_dir, fid_nexposure, set_nexposure=nexp_all, n_extra=n_extra,
+            m_init=magnification, sat_level=sat_level, fid_min_peak=fid_min_peak, fallback=fb_all, **pk)
 
         xf_fid, yf_fid, dxf, dyf, coeff = fitdistortion(
             x_fid, y_fid, np.ones(x_fid.size, dtype=bool), xo_fid, yo_fid,
@@ -535,9 +636,9 @@ def mtlcal(data_dir='./MTL/data/'
         if cross_exclude:
             # fiber 자리를 지우고 fiducial 을 다시 찾아 변환을 다시 맞춘다
             xo_fid, yo_fid, _, theta_guess, (xoff_guess, yoff_guess) = measure_fiducials(
-                fid_heads, xa, ya, fa, data_dir, fid_nexposure, n_extra=n_extra,
-                m_init=magnification, sat_level=sat_level, fid_min_peak=fid_min_peak,
-                exclude=(xo_fib[:nfib_a], yo_fib[:nfib_a]), **pk)
+                heads_all, xa, ya, fa, data_dir, fid_nexposure, set_nexposure=nexp_all,
+                n_extra=n_extra, m_init=magnification, sat_level=sat_level, fid_min_peak=fid_min_peak,
+                fallback=fb_all, exclude=(xo_fib[:nfib_a], yo_fib[:nfib_a]), **pk)
             xf_fid, yf_fid, dxf, dyf, coeff = fitdistortion(
                 x_fid, y_fid, np.ones(x_fid.size, dtype=bool), xo_fid, yo_fid,
                 np.arange(x_fid.size), theta_guess, xoff_guess, yoff_guess,

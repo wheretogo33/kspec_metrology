@@ -8,6 +8,8 @@
     measure            목표 파일 + 이미지 1-3장 -> fiber 위치 오차와 회전량 (한 번 측정)
     show_steps         measure 의 결과를 단계별 그림으로 (검출 / fiducial 매칭 / fiber 매칭)
     read_targets       object.info 형식(xp, yp 또는 각도) 목표 파일 읽기
+    make_target        같은 각도 / 같은 offset / 개별 (x, y) 로 목표 파일 만들기
+    check_peaks        이미지 한 장의 peak 검출 점검 (개수, 밝기, 쪼개짐)
     make_fiber_table   꽂힌 홀만 positioner 로 둔 Fiber_Configuration 표
     ab2xy, xy2ab       positioner 각도 <-> 초점면 좌표 (패키지 각도 규약 그대로)
     make_target_file   'ID x y' 또는 'ID alpha beta' 텍스트 -> target json
@@ -94,8 +96,9 @@ def make_fiber_table(positioners, out_path, src_table=None, fiducials=None):
 def ab2xy(xorigin, yorigin, alpha_deg, beta_deg, arm1, arm2):
     """positioner 출력 각도 (alpha, beta) [deg, json 과 같은 부호 규약] -> fiber 끝 (x, y) [mm].
     mtlcal 은 계산각 (theta, phi) 를 부호를 뒤집어 내보내므로 (출력 = -계산각) 여기서 되돌린다."""
-    theta = -np.asarray(alpha_deg, float)/rtod
-    phi = -np.asarray(beta_deg, float)/rtod
+    sa, sb = cfg.ANGLE_SIGN
+    theta = sa*np.asarray(alpha_deg, float)/rtod          # 부호 x 부호 = 1 이므로 곱해서 되돌린다
+    phi = sb*np.asarray(beta_deg, float)/rtod
     if cfg.CLOCKWISE:
         theta, phi = -theta, -phi
     x = xorigin + arm1*np.cos(theta) + arm2*np.cos(theta + phi)
@@ -113,7 +116,8 @@ def xy2ab(xorigin, yorigin, x, y, arm1, arm2):
         th.flat[i], ph.flat[i] = find_angle_double_method2_select_elbow(
             xo.flat[i], yo.flat[i], x.flat[i], y.flat[i], a1.flat[i], a2.flat[i],
             elbow=cfg.ELBOW, clockwise=cfg.CLOCKWISE)
-    return -th*rtod, -ph*rtod
+    sa, sb = cfg.ANGLE_SIGN
+    return sa*th*rtod, sb*ph*rtod
 
 
 def read_spec(path):
@@ -275,7 +279,7 @@ def _inspect(data_dir, head, fid_heads, target_file, nexposure=1, fid_nexposure=
              threshold=3e3, nwindow=40, niter_recenter=0, finder='sep', finder_opts=None,
              background='crop', background_opts=None, magnification=None, model='full',
              sat_level=65000., fid_min_peak=0., n_extra=0, use_measured=None,
-             apply_pinhole_offset=False, cross_exclude=True, min_dist=40, n=8):
+             apply_pinhole_offset=False, cross_exclude=True, min_dist=40, fid_fallback_fiber=True, n=8):
     """mtlcal 과 같은 설정으로 단계별로 다시 분석하며 그림을 그린다. json 은 건드리지 않는다."""
     from kspec_metrology.analysis.mtlcal import (load_configuration, measure_fiducials,
                                                  measure_fibers)
@@ -293,12 +297,15 @@ def _inspect(data_dir, head, fid_heads, target_file, nexposure=1, fid_nexposure=
     fid_nexposure = nexposure if fid_nexposure is None else fid_nexposure
     im = load_frames(data_dir, head, nexposure)
     if fid_heads:
+        heads_all = list(fid_heads) + ([head] if fid_fallback_fiber else [])
+        nexp_all = [fid_nexposure]*len(fid_heads) + ([nexposure] if fid_fallback_fiber else [])
+        fb_all = [False]*len(fid_heads) + ([True] if fid_fallback_fiber else [])
         xo_f, yo_f, choice, th, (ox, oy) = measure_fiducials(
-            list(fid_heads), x, y, fid_flag, data_dir, fid_nexposure, m_init=magnification,
-            sat_level=sat_level, fid_min_peak=fid_min_peak, n_extra=n_extra, **pk)
+            heads_all, x, y, fid_flag, data_dir, fid_nexposure, set_nexposure=nexp_all, fallback=fb_all,
+            m_init=magnification, sat_level=sat_level, fid_min_peak=fid_min_peak, n_extra=n_extra, **pk)
         fid_ids = [i for i, f in zip(ids, fid_flag) if f]
-        for k, h in enumerate(fid_heads):
-            imf = load_frames(data_dir, h, fid_nexposure)
+        for k, h in enumerate(heads_all):
+            imf = load_frames(data_dir, h, nexp_all[k])
             show_detections(imf, xo_f, yo_f, labels=fid_ids, flag=(choice != k), n=n,
                             title=f'fiducial set {k} ({h}): cyan = used from this set, orange = taken from another set')
         xf, yf, _, _, coeff = fitdistortion(
@@ -309,8 +316,8 @@ def _inspect(data_dir, head, fid_heads, target_file, nexposure=1, fid_nexposure=
             exclude=(xo_f, yo_f) if cross_exclude else None, **pk)
         if cross_exclude:                       # fiber 자리를 지우고 fiducial 을 다시 (mtlcal 과 같다)
             xo_f, yo_f, choice, th, (ox, oy) = measure_fiducials(
-                list(fid_heads), x, y, fid_flag, data_dir, fid_nexposure, m_init=magnification,
-                sat_level=sat_level, fid_min_peak=fid_min_peak, n_extra=n_extra,
+                heads_all, x, y, fid_flag, data_dir, fid_nexposure, set_nexposure=nexp_all, fallback=fb_all,
+                m_init=magnification, sat_level=sat_level, fid_min_peak=fid_min_peak, n_extra=n_extra,
                 exclude=(xobs[:nfib], yobs[:nfib]), **pk)
             xf, yf, _, _, coeff = fitdistortion(
                 x[fid_flag], y[fid_flag], np.ones(int(fid_flag.sum()), bool), xo_f, yo_f,
@@ -349,6 +356,39 @@ def inspect_trial(run, itrial, n=8):
                     model=run.model, sat_level=run.sat_level, fid_min_peak=run.fid_min_peak,
                     n_extra=run.n_extra, use_measured=run.use_measured,
                     apply_pinhole_offset=run.apply_pinhole_offset, n=n)
+
+
+# ============================================================================ 목표 파일 만들기
+def make_target(out_path, angles=None, offset=None, xy=None, tile='lab', use_measured=None):
+    """target 파일(object.info 형식) 을 만든다. 셋 중 하나를 준다.
+        angles=(alpha, beta)  모든 positioner 를 같은 각도로 [deg, json 부호 규약]
+        offset=(dx, dy)       모든 fiber 끝을 각자의 회전 중심에서 같은 (dx, dy) 만큼 [mm]
+        xy=(xp, yp)           positioner 마다 다른 목표 [mm] (표 순서)
+    각도 파일은 'alpha'/'beta' 키로 저장되어 read_targets 가 그대로 읽는다.
+    반환: 저장한 dict."""
+    ids = list(cfg.fiber_ids()); n = len(ids)
+    if angles is not None:
+        data = dict(tile_id=tile, alpha=[float(angles[0])]*n, beta=[float(angles[1])]*n)
+    elif offset is not None:
+        from kspec_metrology.analysis.mtlcal import load_configuration
+        tmp = out_path + '.tmp'
+        json.dump(dict(tile_id=tile, xp=[0.]*n, yp=[0.]*n), open(tmp, 'w'))
+        try:
+            xo, yo, _, _, _, nfib = load_configuration(tmp, apply_zenith_offset=False, use_measured=use_measured)
+        finally:
+            os.remove(tmp)
+        data = dict(tile_id=tile, xp=[float(v) for v in xo[:nfib] + offset[0]],
+                    yp=[float(v) for v in yo[:nfib] + offset[1]])
+    elif xy is not None:
+        xp, yp = np.asarray(xy[0], float), np.asarray(xy[1], float)
+        if xp.size != n or yp.size != n:
+            raise ValueError(f"xy must have {n} entries (table order {ids})")
+        data = dict(tile_id=tile, xp=[float(v) for v in xp], yp=[float(v) for v in yp])
+    else:
+        raise ValueError("give angles=(alpha, beta), offset=(dx, dy) or xy=(xp, yp)")
+    with open(out_path, 'w') as ff:
+        json.dump(data, ff, indent=1)
+    return data
 
 
 # ============================================================================ 검출 점검
@@ -436,7 +476,7 @@ def measure(target_file, fiber_image, fid_images=(), out_dir='./lab_out', tile='
             magnification=None, model='full', nwindow=40, threshold=3e3, niter_recenter=0,
             finder='sep', finder_opts=None, background='crop', background_opts=None,
             sat_level=65000., fid_min_peak=0., n_extra=0, use_measured=None, mode='Raw',
-            cross_exclude=True, min_dist=40):
+            cross_exclude=True, min_dist=40, fid_fallback_fiber=True):
     """한 배치를 한 번 잰다: 목표 파일과 이미지 1-3장 -> fiber 위치 오차와 positioner 회전량.
 
     target_file : object.info 형식 (read_targets 참고; xp/yp 또는 각도)
@@ -485,8 +525,13 @@ def measure(target_file, fiber_image, fid_images=(), out_dir='./lab_out', tile='
             shutil.copy2(src, dst)
 
     if itrial == 1:
-        from kspec_metrology.analysis.mtlcal import save_initial_angles
-        save_initial_angles(out_dir, tile, tfile, use_measured=use_measured)   # trial 0 = 목표 각도
+        from kspec_metrology.analysis.mtlcal import save_initial_angles, save_angles
+        if kind == 'ab':
+            # 각도로 준 목표는 그 값 그대로 trial 0 으로 (xy 로 갔다 오면 -330 처럼 360 도 돌아간 값이 된다)
+            a = np.empty(2*xp.size); a[0::2], a[1::2] = read_targets(target_file)[:2]
+            save_angles(out_dir, tile, 0, a)
+        else:
+            save_initial_angles(out_dir, tile, tfile, use_measured=use_measured)   # trial 0 = 목표 각도
     head = naming.image_head(tile, itrial)
     place(fiber_image, image_path(data_dir, head, 0))
     fid_heads = []
@@ -500,7 +545,8 @@ def measure(target_file, fiber_image, fid_images=(), out_dir='./lab_out', tile='
                   finder=finder, finder_opts=finder_opts, background=background,
                   background_opts=background_opts, magnification=magnification, model=model,
                   sat_level=sat_level, fid_min_peak=fid_min_peak, n_extra=n_extra,
-                  use_measured=use_measured, cross_exclude=cross_exclude, min_dist=min_dist)
+                  use_measured=use_measured, cross_exclude=cross_exclude, min_dist=min_dist,
+                  fid_fallback_fiber=fid_fallback_fiber)
     dx, dy, angle_rot, angle_cum = mtlcal(data_dir=data_dir, head=head, nexposure=1,
                                           fid_head=fid_heads or None, target_file=tfile,
                                           json_dir=out_dir, target_name=tile, itrial=itrial, **params)
