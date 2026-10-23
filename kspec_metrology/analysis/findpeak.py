@@ -27,6 +27,8 @@ def findpeak(npeaks
             , background='crop'
             , background_opts=None
             , sat_level=65000.
+            , exclude=None
+            , exclude_r=60
             , ReturnFiberImage=False
             , ReturnSpotSize=False
             , ReturnNsat=False):
@@ -39,6 +41,9 @@ def findpeak(npeaks
         nmax 를 넘으면 어두운 것부터 버리고, nmin 에 못 미치면 예외를 낸다.
     sat_level : 포화 수준 [ADU, 배경 빼기 전]. ReturnNsat 때 창 안의 포화 화소 수를
         센다 (fiducial 노출을 고를 때 쓴다).
+    exclude : (xchip, ychip) 칩 좌표 [mm] 배열. 그 자리 반지름 exclude_r [px] 안을 배경값으로
+        덮은 뒤 peak 을 찾는다. fiber 노출에 fiducial 이 같이 찍혔을 때(또는 그 반대)
+        이미 아는 쪽을 지우는 데 쓴다. 'Raw' 모드에서만 뜻이 있다.
 
     finder : peak을 찾는 방법. 'sep'(기본), 'find_peaks', 'daofind',
         'segmentation'. 어느 것을 쓰든 뒤 단계는 같다 (peakfind 참고).
@@ -85,6 +90,20 @@ def findpeak(npeaks
         nmin, nmax = int(npeaks[0]), int(npeaks[1])
     else:
         nmin = nmax = int(npeaks)
+
+    #---이미 아는 spot 지우기 (fiber 노출의 fiducial, fiducial 노출의 fiber)------------------
+    if exclude is not None and len(exclude[0]):
+        ex_u = nearest_index_sorted(xchip, np.atleast_1d(exclude[0])).astype(int)
+        ex_v = nearest_index_sorted(ychip, np.atleast_1d(exclude[1])).astype(int)
+        r = int(exclude_r)
+        yy, xx = np.ogrid[-r:r+1, -r:r+1]
+        disc = (xx*xx + yy*yy) <= r*r
+        for u0, v0 in zip(ex_u, ex_v):
+            y0, y1 = max(v0-r, 0), min(v0+r+1, ny); x0, x1 = max(u0-r, 0), min(u0+r+1, nx)
+            d = disc[(y0-(v0-r)):(y1-(v0-r)), (x0-(u0-r)):(x1-(u0-r))]
+            patch = im[y0:y1, x0:x1]
+            patch[d] = raw_level
+        log.info("Masked %d known spot(s) (r = %d px) before peak finding", ex_u.size, r)
 
     #---Background--------------------------------------------------------------
     # 'crop'은 여기서 빼지 않고 centroid 단계에서 조각마다 뺀다.

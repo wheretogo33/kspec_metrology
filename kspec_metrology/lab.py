@@ -275,7 +275,7 @@ def _inspect(data_dir, head, fid_heads, target_file, nexposure=1, fid_nexposure=
              threshold=3e3, nwindow=40, niter_recenter=0, finder='sep', finder_opts=None,
              background='crop', background_opts=None, magnification=None, model='full',
              sat_level=65000., fid_min_peak=0., n_extra=0, use_measured=None,
-             apply_pinhole_offset=False, n=8):
+             apply_pinhole_offset=False, cross_exclude=True, n=8):
     """mtlcal 과 같은 설정으로 단계별로 다시 분석하며 그림을 그린다. json 은 건드리지 않는다."""
     from kspec_metrology.analysis.mtlcal import (load_configuration, measure_fiducials,
                                                  measure_fibers)
@@ -304,7 +304,19 @@ def _inspect(data_dir, head, fid_heads, target_file, nexposure=1, fid_nexposure=
             x[fid_flag], y[fid_flag], np.ones(int(fid_flag.sum()), bool), xo_f, yo_f,
             np.arange(int(fid_flag.sum())), th, ox, oy, model=model, m_init=magnification)
         xfocal, yfocal, dist, (xobs, yobs) = measure_fibers(
-            head, x, y, nfib, coeff, data_dir, nexposure, n_extra=n_extra, **pk)
+            head, x, y, nfib, coeff, data_dir, nexposure, n_extra=n_extra,
+            exclude=(xo_f, yo_f) if cross_exclude else None, **pk)
+        if cross_exclude:                       # fiber 자리를 지우고 fiducial 을 다시 (mtlcal 과 같다)
+            xo_f, yo_f, choice, th, (ox, oy) = measure_fiducials(
+                list(fid_heads), x, y, fid_flag, data_dir, fid_nexposure, m_init=magnification,
+                sat_level=sat_level, fid_min_peak=fid_min_peak, n_extra=n_extra,
+                exclude=(xobs[:nfib], yobs[:nfib]), **pk)
+            xf, yf, _, _, coeff = fitdistortion(
+                x[fid_flag], y[fid_flag], np.ones(int(fid_flag.sum()), bool), xo_f, yo_f,
+                np.arange(int(fid_flag.sum())), th, ox, oy, model=model, m_init=magnification)
+            xfocal, yfocal, dist, (xobs, yobs) = measure_fibers(
+                head, x, y, nfib, coeff, data_dir, nexposure, n_extra=n_extra,
+                exclude=(xo_f, yo_f), **pk)
         xfocal[fid_flag], yfocal[fid_flag] = xf, yf
         show_detections(im, xobs, yobs, labels=ids, flag=fid_flag, n=n,
                         title=f'fiber image ({head}): matched peaks (orange = fiducial positions, not used)')
@@ -377,7 +389,8 @@ def next_trial(out_dir, tile):
 def measure(target_file, fiber_image, fid_images=(), out_dir='./lab_out', tile='lab', itrial=None,
             magnification=None, model='full', nwindow=40, threshold=3e3, niter_recenter=0,
             finder='sep', finder_opts=None, background='crop', background_opts=None,
-            sat_level=65000., fid_min_peak=0., n_extra=0, use_measured=None, mode='Raw'):
+            sat_level=65000., fid_min_peak=0., n_extra=0, use_measured=None, mode='Raw',
+            cross_exclude=True):
     """한 배치를 한 번 잰다: 목표 파일과 이미지 1-3장 -> fiber 위치 오차와 positioner 회전량.
 
     target_file : object.info 형식 (read_targets 참고; xp/yp 또는 각도)
@@ -441,7 +454,7 @@ def measure(target_file, fiber_image, fid_images=(), out_dir='./lab_out', tile='
                   finder=finder, finder_opts=finder_opts, background=background,
                   background_opts=background_opts, magnification=magnification, model=model,
                   sat_level=sat_level, fid_min_peak=fid_min_peak, n_extra=n_extra,
-                  use_measured=use_measured)
+                  use_measured=use_measured, cross_exclude=cross_exclude)
     dx, dy, angle_rot, angle_cum = mtlcal(data_dir=data_dir, head=head, nexposure=1,
                                           fid_head=fid_heads or None, target_file=tfile,
                                           json_dir=out_dir, target_name=tile, itrial=itrial, **params)

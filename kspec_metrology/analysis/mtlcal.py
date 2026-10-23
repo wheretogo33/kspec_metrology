@@ -301,7 +301,7 @@ def save_offsets(json_dir, target_name, itrial, dx, dy, angle_rot, nfib):
 
 
 def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
-                      m_init=None, sat_level=65000., fid_min_peak=0., n_extra=0, **pk):
+                      m_init=None, sat_level=65000., fid_min_peak=0., n_extra=0, exclude=None, **pk):
     """fiducial 전용 노출 세트들에서 fiducial 의 카메라 좌표를 잰다.
 
     x, y 는 fiber 목표 + fiducial 설계 위치 전체, fid_flag 는 그중 fiducial.
@@ -313,6 +313,9 @@ def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
     가장 적은 세트를 쓴다. fid_min_peak 보다 어두운 검출은 (다른 세트가 있으면)
     피한다.
 
+    exclude : (xchip, ychip) 이미 아는 fiber 의 칩 좌표. 주면 그 자리를 지우고 찾는다
+              (findpeak 의 exclude). 그러면 fiducial 수만 기대한다.
+
     반환: xobs, yobs (fiducial 순서), choice (fiducial 마다 고른 세트 번호),
           theta_guess, (xoff, yoff) (마지막 매칭의 초기값; fitdistortion 용)
     """
@@ -320,9 +323,10 @@ def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
     nfid, nfib = int(fid_flag.sum()), int((~fid_flag).sum())
     sets = []
     for k, head in enumerate(fid_heads):
-        _, xobs, yobs, peak, nsat = findpeak((nfid, nfid+nfib+n_extra), data_dir=data_dir, head=head,
+        nmax = nfid + n_extra if exclude is not None else nfid + nfib + n_extra
+        _, xobs, yobs, peak, nsat = findpeak((nfid, nmax), data_dir=data_dir, head=head,
                                              nexposure=nexposure, sat_level=sat_level,
-                                             ReturnNsat=True, **pk)
+                                             exclude=exclude, ReturnNsat=True, **pk)
         if xobs.size > nfid:
             # fiber 도 보인다: 전체 패턴으로 매칭하고 fiducial 자리만 쓴다
             imatch, theta_guess, (xoff, yoff) = matchfiber(x, y, xobs, yobs, m_init=m_init)
@@ -359,17 +363,21 @@ def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
     return xobs, yobs, choice, last['theta'], last['off']
 
 
-def measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, max_dist=None, n_extra=0, **pk):
+def measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, max_dist=None, n_extra=0,
+                   exclude=None, **pk):
     """fiber 노출에서 peak 을 찾아 (fiducial 로 맞춘) 변환으로 focal 좌표로 옮기고
     목표 위치에 가장 가까운 것을 그 fiber 로 본다. x, y 는 fiber + fiducial 전체
     목표 (fiducial 은 그 자리의 검출을 fiber 로 잘못 잡지 않게 하려고 넣는다).
+
+    exclude : (xchip, ychip) 이미 아는 fiducial 의 칩 좌표. 주면 그 자리를 지우고 찾는다.
 
     반환: xfocal, yfocal (x, y 순서), dist (매칭 거리 [mm]), (xobs, yobs) (같은 순서의 칩 좌표)
     """
     log = get_logger()
     nfid = x.size - nfib
-    _, xobs, yobs, _ = findpeak((nfib, nfib+nfid+n_extra), data_dir=data_dir, head=head,
-                                nexposure=nexposure, **pk)
+    nmax = nfib + n_extra if exclude is not None else nfib + nfid + n_extra
+    _, xobs, yobs, _ = findpeak((nfib, nmax), data_dir=data_dir, head=head,
+                                nexposure=nexposure, exclude=exclude, **pk)
     xf, yf = transform(xobs, yobs, coeff)
     dist, j = cKDTree(np.column_stack((xf, yf))).query(np.column_stack((x, y)))
     if np.unique(j[:nfib]).size != nfib:
@@ -403,6 +411,7 @@ def mtlcal(data_dir='./MTL/data/'
            , sat_level=65000.
            , fid_min_peak=0.
            , n_extra=0
+           , cross_exclude=True
            , target_file=None
            , json_dir=None
            , target_name=None
@@ -427,6 +436,8 @@ def mtlcal(data_dir='./MTL/data/'
     sat_level 은 포화 판정 수준 [ADU], fid_min_peak 은 fiducial 노출을 고를 때 이보다
     어두운 검출을 피하는 기준이다. n_extra 는 표에 없는데 이미지에 보이는 밝은 점의 수
     (예: 고정된 sky fiber 9개). 그만큼 검출을 더 허용하고 매칭에서 자연히 빠진다.
+    cross_exclude (기본 True) 는 노출을 나눠 찍었을 때 fiber 노출의 fiducial 자리와
+    fiducial 노출의 fiber 자리를 서로 지우고 찾는 것이다 (양쪽 다 켜 놓고 찍은 경우).
 
     mode는 findpeak에 그대로 넘어간다. "Raw"는 threshold를 조절해 가며 peak을
     찾고, "Predict"는 목표 위치에서 출발해 가장 밝은 픽셀로 정렬한다.
@@ -471,6 +482,9 @@ def mtlcal(data_dir='./MTL/data/'
               background_opts=background_opts)
 
     # 끊어진 fiber (fiber_config.FIBER_EXCLUDE): 찾지 않고 매칭에서 뺀다. 배열 순서는 그대로.
+    # cross_exclude: 노출을 나눠 찍었는데 fiber 노출에 fiducial 이, fiducial 노출에 fiber 가
+    # 같이 찍힌 경우. fiducial 노출에서 찾은 fiducial 자리를 fiber 노출에서 지우고 fiber 를
+    # 찾은 뒤, 그 fiber 자리를 fiducial 노출에서 지우고 fiducial 을 한 번 더 찾는다.
     dead = np.r_[cfg.dead_mask(), np.zeros(x.size-nfib, dtype=bool)]
     if dead.any():
         log.info("Excluded fiber(s) (not expected in the image): %s",
@@ -513,8 +527,22 @@ def mtlcal(data_dir='./MTL/data/'
             np.arange(x_fid.size), theta_guess, xoff_guess, yoff_guess,
             model=model, m_init=magnification)
 
-        xf_a, yf_a, _, _ = measure_fibers(head, xa, ya, nfib_a, coeff, data_dir, nexposure,
-                                          n_extra=n_extra, **pk)
+        xf_a, yf_a, _, (xo_fib, yo_fib) = measure_fibers(
+            head, xa, ya, nfib_a, coeff, data_dir, nexposure, n_extra=n_extra,
+            exclude=(xo_fid, yo_fid) if cross_exclude else None, **pk)
+        if cross_exclude:
+            # fiber 자리를 지우고 fiducial 을 다시 찾아 변환을 다시 맞춘다
+            xo_fid, yo_fid, _, theta_guess, (xoff_guess, yoff_guess) = measure_fiducials(
+                fid_heads, xa, ya, fa, data_dir, fid_nexposure, n_extra=n_extra,
+                m_init=magnification, sat_level=sat_level, fid_min_peak=fid_min_peak,
+                exclude=(xo_fib[:nfib_a], yo_fib[:nfib_a]), **pk)
+            xf_fid, yf_fid, dxf, dyf, coeff = fitdistortion(
+                x_fid, y_fid, np.ones(x_fid.size, dtype=bool), xo_fid, yo_fid,
+                np.arange(x_fid.size), theta_guess, xoff_guess, yoff_guess,
+                model=model, m_init=magnification)
+            xf_a, yf_a, _, _ = measure_fibers(
+                head, xa, ya, nfib_a, coeff, data_dir, nexposure, n_extra=n_extra,
+                exclude=(xo_fid, yo_fid), **pk)
         xf_a[fa], yf_a[fa] = xf_fid, yf_fid                      # fiducial 은 전용 노출 값
 
     xfocal = np.full(x.size, np.nan); yfocal = np.full(y.size, np.nan)
