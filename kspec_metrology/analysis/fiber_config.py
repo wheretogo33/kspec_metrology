@@ -348,11 +348,12 @@ def dead_mask():
 
 # find_angle_double_method2_select_elbow에 넘기는 자세 정의
 # 출력 각도의 부호 (alpha, beta). json / target 파일의 각도 = 부호 x 계산각(theta, phi).
-# 본 장비 규약은 (-1, -1). 실험실 positioner(2026-10-23)는 beta 부호가 반대였다
-# (beta=150 으로 보낸 fiber 가 패키지 규약의 beta=-150 자리에 있었다). 그 경우
-# KSPEC_ANGLE_SIGN="-1,1" 또는 fiber_config.ANGLE_SIGN = (-1., 1.) 로 둔다.
+# positioner 규약 (2026-10-23 확인): alpha 는 반시계가 양이고 출력에 음수가 붙는다
+# (alpha = -theta), beta 는 항상 0 이상 (beta = +phi, phi 는 elbow-down 으로 [0, 180]).
+# 2026-10-23 이전 기본값 (-1, -1) 은 beta 부호가 틀렸었다. 다른 규약이면
+# KSPEC_ANGLE_SIGN="-1,-1" 또는 fiber_config.ANGLE_SIGN 으로 바꾼다.
 ANGLE_SIGN_ENV = 'KSPEC_ANGLE_SIGN'
-ANGLE_SIGN = (-1., -1.)
+ANGLE_SIGN = (-1., 1.)
 if os.environ.get(ANGLE_SIGN_ENV, '').strip():
     ANGLE_SIGN = tuple(float(t) for t in os.environ[ANGLE_SIGN_ENV].replace(';', ',').split(','))
     if len(ANGLE_SIGN) != 2 or any(abs(v) != 1. for v in ANGLE_SIGN):

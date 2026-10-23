@@ -45,10 +45,9 @@ LabTest_README.md            이 파일
 **끊어진 fiber**: 노트북 1절의 `BROKEN_FIBERS = ['C4']` 처럼 ID 를 적는다. 표와
 목표 파일은 그대로 두고 그 fiber 만 이미지에서 찾지 않는다 (결과는 NaN / 회전량 0).
 
-**각도 부호**: 노트북 1절의 `ANGLE_SIGN`. 출력 각도 = 부호 × 계산각. 본 장비 규약은
-`(-1, -1)`; 2026-10-23 실험실 positioner 는 beta 부호가 반대라 `(-1, 1)` 이 맞았다
-(beta = 150 으로 보낸 fiber 가 `(-1, -1)` 규약의 beta = -150 자리에 있었다). 틀리면
-fiber 가 목표에서 수 mm 떨어져 나온다 (`fiber - target` 중앙값이 mm 단위).
+**각도 부호**: 노트북 1절의 `ANGLE_SIGN`. 출력 각도 = 부호 × 계산각. 기본 `(-1, 1)`:
+alpha 는 반시계가 양이고 출력에 음수가 붙음, beta 는 항상 0 이상 (2026-10-23 실험실에서
+확인). 틀리면 fiber 가 목표에서 수 mm 떨어져 나온다 (`fiber - target` 중앙값이 mm 단위).
 
 **포화**: fiducial 전용 노출에서 안 보이는 fiducial 은 fiber 노출(보통 포화)에서라도
 가져온다. 포화된 것은 로그에 `saturated ... (used anyway)` 로 남는다. 촬영을 직접 하는

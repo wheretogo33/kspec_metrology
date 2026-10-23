@@ -223,7 +223,8 @@ def _flatten_angles(theta, phi):
     """
     sa, sb = cfg.ANGLE_SIGN
     angles = np.empty(2*theta.size)
-    angles[0::2] = sa*theta*rtod
+    alpha = sa*theta*rtod
+    angles[0::2] = (alpha + 180.) % 360. - 180.           # (-180, 180] 로 접는다 (30 이 -330 으로 안 나오게)
     angles[1::2] = sb*phi*rtod
 
     return angles
