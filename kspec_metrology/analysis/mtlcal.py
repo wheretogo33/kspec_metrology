@@ -219,7 +219,7 @@ def _flatten_angles(theta, phi):
     """fiber 순서의 (theta, phi)를 (alpha, beta)가 번갈아 놓인 degree 배열로 편다.
 
     출력 부호는 positioner 제어 규약에 맞춘다 (출력 각도 = fiber_config.ANGLE_SIGN x 계산각;
-    기본 (-1, -1) 즉 -계산각).
+    기본 (1, 1): alpha 반시계 양, beta >= 0).
     """
     sa, sb = cfg.ANGLE_SIGN
     angles = np.empty(2*theta.size)

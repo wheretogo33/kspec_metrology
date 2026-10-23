@@ -211,11 +211,11 @@ INFO Measured geometry /경로/Measured_Geometry.txt: 2/103 holes replaced
 ### 각도 부호와 positioner 규약
 
 계산은 반시계(CCW) 기준으로 theta ∈ [0°, 360°), elbow-down 으로 phi ∈ [0°, 180°] 를
-구하고, 출력 각도 = `fiber_config.ANGLE_SIGN` × 계산각 이다. **기본 `(-1, 1)`**:
-alpha 는 반시계가 양이고 출력에 음수가 붙어 alpha = −theta (그 뒤 (−180°, 180°] 로
-접음), beta 는 항상 0 이상 (beta = +phi). 2026-10-23 실험실 측정으로 확인한 규약이며,
-그 이전 기본값 `(-1, -1)` 은 beta 부호가 틀려 있었다 (0.3.x 까지의 json 은 beta 부호가
-반대). 다른 규약이면 `KSPEC_ANGLE_SIGN="-1,-1"` 또는 `fiber_config.ANGLE_SIGN`.
+구하고, 출력 각도 = `fiber_config.ANGLE_SIGN` × 계산각 이다. **기본 `(1, 1)`**:
+alpha = +theta (초점면 +x 에서 반시계가 양; (−180°, 180°] 로 접음), beta = +phi ≥ 0.
+2026-10-23 실험실에서 (−30°, 150°) 으로 보낸 fiber 72개가 이 규약의 자리에 있는 것으로
+확인했다. 그 이전 기본값 `(-1, -1)` 은 두 각 모두 부호가 반대였다 (0.3.x 까지의
+json). 다른 규약이면 `KSPEC_ANGLE_SIGN="-1,-1"` 또는 `fiber_config.ANGLE_SIGN`.
 부호가 틀리면 fiber 가 목표에서 수 mm 떨어져 나오고 매칭이 겹친다.
 
 ### 포화와 노출 자동 조정
