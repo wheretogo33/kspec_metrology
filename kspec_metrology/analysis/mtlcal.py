@@ -150,8 +150,7 @@ def load_configuration(target_file=None, apply_zenith_offset=True,
                             ', '.join(sorted(unused)[:10]))
 
     target = read_target(target_file)
-    xp = np.asarray(target['xp'], dtype=float)
-    yp = np.asarray(target['yp'], dtype=float)
+    xp, yp = _target_xy(target, xorigin[:nfib], yorigin[:nfib], use_measured, target_file)
 
     # 개수가 다르면 예전에는 앞에서 잘라 쓰며 조용히 지나갔다. fiber 표를 바꾸고
     # target 파일을 안 바꾼 경우가 대표적인데, 엉뚱한 fiber에 엉뚱한 목표가
@@ -185,6 +184,35 @@ def load_configuration(target_file=None, apply_zenith_offset=True,
                      np.median(np.sqrt(dx**2 + dy**2))*1e3)
 
     return xorigin, yorigin, x, y, fid_flag, nfib
+
+
+def _target_xy(target, xorigin, yorigin, use_measured, target_file=None):
+    """target dict -> fiber 목표 (xp, yp) [mm].
+    {"xp", "yp"} 면 그대로, {"alpha", "beta"} (deg, 출력 규약) 또는 각도 json ({"C4_a", "C4_b"})
+    이면 positioner 회전 중심과 arm 길이로 (x, y) 를 만든다 (calibration run 처럼 모든 arm 을
+    같은 각도로 둘 때 object.info 에 각도만 적어도 된다)."""
+    low = {str(k).lower(): v for k, v in target.items()}
+    if 'xp' in low and 'yp' in low:
+        return np.asarray(low['xp'], dtype=float), np.asarray(low['yp'], dtype=float)
+    ids = list(cfg.fiber_ids())
+    if 'alpha' in low and 'beta' in low:
+        al, be = np.asarray(low['alpha'], dtype=float), np.asarray(low['beta'], dtype=float)
+    elif all(f"{i}_{ALPHA_SUFFIX}" in target and f"{i}_{BETA_SUFFIX}" in target for i in ids):
+        al = np.array([target[f"{i}_{ALPHA_SUFFIX}"] for i in ids], dtype=float)
+        be = np.array([target[f"{i}_{BETA_SUFFIX}"] for i in ids], dtype=float)
+    else:
+        raise ValueError(f"target 파일 {target_file or cfg.TARGET_INFO_PATH} 에 'xp'/'yp', "
+                         f"'alpha'/'beta', 또는 '{{ID}}_a'/'{{ID}}_b' 키가 필요합니다")
+    if al.size != len(ids) or be.size != len(ids):
+        raise ValueError(f"target 파일의 각도 개수({al.size}/{be.size})가 positioner 개수({len(ids)})와 다릅니다")
+    sa, sb = cfg.ANGLE_SIGN
+    theta, phi = sa*al/rtod, sb*be/rtod            # 부호 x 부호 = 1 이므로 곱해서 되돌린다
+    if cfg.CLOCKWISE:
+        theta, phi = -theta, -phi
+    a1, a2 = cfg.arm_lengths(use_measured)
+    xp = xorigin + a1*np.cos(theta) + a2*np.cos(theta + phi)
+    yp = yorigin + a1*np.sin(theta) + a2*np.sin(theta + phi)
+    return xp, yp
 
 
 def _arm_angles(xorigin, yorigin, xtarget, ytarget, use_measured=None):
@@ -473,6 +501,15 @@ def measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, max_dist=None, 
     _, xobs, yobs, _ = findpeak((nfib, nmax), data_dir=data_dir, head=head,
                                 nexposure=nexposure, exclude=exclude, **pk)
     xf, yf = transform(xobs, yobs, coeff)
+    fixed = cfg.fixed_spots()
+    if fixed:
+        # 고정된 점(sky fiber, 고장난 positioner) 자리의 검출은 fiber 후보에서 뺀다
+        fx = np.array([v[0] for v in fixed.values()]); fy = np.array([v[1] for v in fixed.values()])
+        dfix, _ = cKDTree(np.column_stack((fx, fy))).query(np.column_stack((xf, yf)))
+        keep = dfix > cfg.FIXED_SPOT_TOL
+        log.info("Fixed spots (%s): %d detection(s) removed from the fiber candidates",
+                 os.path.basename(cfg.FIXED_SPOTS_PATH), int((~keep).sum()))
+        xobs, yobs, xf, yf = xobs[keep], yobs[keep], xf[keep], yf[keep]
     dist, j = cKDTree(np.column_stack((xf, yf))).query(np.column_stack((x, y)))
     if np.unique(j[:nfib]).size != nfib:
         log.warning("Fiber matching is not unique: %d fibers share a peak",

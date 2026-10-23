@@ -337,6 +337,38 @@ if os.environ.get(FIBER_EXCLUDE_ENV, '').strip():      # 환경변수가 있으�
                      os.environ[FIBER_EXCLUDE_ENV].replace(';', ',').split(',') if t.strip()]
 
 
+# 켜져 있지만 움직이지 않는 점들 (sky fiber 9개, 고장나 고정된 positioner 의 fiber).
+# 초점면 좌표 [mm] 를 파일에 적어 두면 그 자리(반지름 FIXED_SPOT_TOL)의 검출은 fiber 매칭에서
+# 뺀다. 고장난 positioner 는 FIBER_EXCLUDE 에도 넣어 목표·json 에서 빼야 한다.
+#   # name   X        Y
+#   sky1    47.5   115.18
+#   C6      35.3    97.6     # 고장: 이 자리에 고정
+# 파일: analysis/Fixed_Spots.txt (KSPEC_FIXED_SPOTS 로 바꿀 수 있다). 없으면 빈 dict.
+FIXED_SPOTS_ENV = 'KSPEC_FIXED_SPOTS'
+FIXED_SPOTS_PATH = os.environ.get(FIXED_SPOTS_ENV) or str(Path(__file__).with_name('Fixed_Spots.txt'))
+FIXED_SPOT_TOL = 1.5          # 이 거리 [mm] 안의 검출을 고정 점으로 본다
+
+
+def fixed_spots(path=None):
+    """{name: (x, y)} [mm]. 파일이 없으면 빈 dict."""
+    path = path or FIXED_SPOTS_PATH
+    if not os.path.exists(path):
+        return {}
+    out = {}
+    with open(path) as ff:
+        for n, line in enumerate(ff, 1):
+            line = line.split('#')[0].strip()
+            if not line:
+                continue
+            p = line.replace(',', ' ').split()
+            if len(p) != 3:
+                raise ValueError(f"{path}:{n}: 'name X Y' 세 칸이어야 한다: {line!r}")
+            if p[0] in out:
+                raise ValueError(f"{path}:{n}: {p[0]} 가 중복이다")
+            out[p[0]] = (float(p[1]), float(p[2]))
+    return out
+
+
 def dead_mask():
     """fiber_ids() 순서로, 쓰지 않는(끊어진) fiber 면 True."""
     ids = list(fiber_ids())

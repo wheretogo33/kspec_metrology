@@ -228,6 +228,23 @@ trial 에도 쓴다. 분석 쪽에서는 fiducial 전용 노출에 안 보이는
 fiducial 을 일부만 담아도 된다 (가장 잘 맞은 세트의 affine 변환으로 다른 세트에서
 다시 붙인다).
 
+### calibration run (모든 arm 을 같은 각도로)
+
+target 파일(object.info) 에 `xp`/`yp` 대신 각도를 적어도 된다: `{"alpha": [...], "beta": [...]}`
+(positioner 순서, deg, 출력 규약) 또는 이 패키지의 각도 json 형식 (`"C4_a": ..`).
+`load_configuration` 이 회전 중심(실측)과 arm 길이로 (x, y) 를 만든다. 따라서 모든 arm 을
+같은 각도로 두는 calibration run 은 target 파일만 바꿔 끼우면 된다
+(`lab.make_target(path, angles=(-30, 150))` 으로 만들 수 있다).
+
+### 켜져 있지만 무시할 점 (sky fiber, 고장난 positioner)
+
+`analysis/Fixed_Spots.txt` 에 초점면 좌표 [mm] 를 적는다 (`name X Y`; 경로는
+`KSPEC_FIXED_SPOTS`). 그 자리 1.5 mm (`fiber_config.FIXED_SPOT_TOL`) 안의 검출은 fiber
+후보에서 빠진다. 고장나 움직이지 않는 positioner 는 여기에 fiber 자리를 적고
+`FIBER_EXCLUDE` 에도 넣는다 (목표·json 에서 빠짐). 검출 개수 상한은 `n_extra` 로 늘려
+둔다 (sky fiber 9개면 9). 좌표를 모르는 동안은 `n_extra` 만으로도 돌아가지만, 그 점이
+어느 fiber 의 목표보다 가까이 있으면 잘못 붙을 수 있어 좌표를 적어 두는 쪽이 안전하다.
+
 ### 끊어진 fiber
 
 fiber 가 끊어져 불이 안 들어오면 표와 target 파일, json key 순서는 그대로 두고
@@ -498,6 +515,27 @@ INFO Recentering shift [px]: median 3.2, 95% 7.1, max 8.5 (limit 20)
 `fiber_config.TARGET_INFO_PATH` 의 기본값은 관측 시스템 경로
 (`/home/kspecmtl/work/KSPEC_ICS/MTL/target/object.info`) 이므로, 다른
 환경에서는 `target_file` 인자로 직접 넘겨야 한다.
+
+## positioner 회전 중심 · arm 길이 측정 (arm scan)
+
+`analysis/armcal.py`. beta 를 고정하고 alpha 를 한 바퀴 돌리며 찍은 이미지들에서
+positioner 마다 fiber 끝의 궤적에 원을 맞춘다 (중심 = 회전 중심, 반지름
+R = |a₁ + a₂e^{iφ}|). beta = 0 과 180 두 번이면 `fit_arms` 로 a₁, a₂ 를 따로 구한다.
+
+```python
+from kspec_metrology.analysis import armcal
+res = armcal.arm_calibration(images, fid_images=None, magnification=8.4, n_extra=9,
+                             threshold=1e3, min_dist=80)
+res.table                      # id, x0, y0, R, rms, n, dx, dy (설계 중심과의 차)
+armcal.plot_arm_calibration(res)
+armcal.write_measured_geometry(res, 'Measured_Geometry_scan.txt',
+                               template='analysis/Measured_Geometry.txt')
+```
+
+이미지마다 fiducial 이 같이 찍혀 있으면 이미지마다 변환을 새로 맞춘다. 각
+positioner 중심에서 arm 길이 + 1 mm 안의 검출 중 중심에 가장 가까운 것을 그 궤적
+점으로 본다 (이웃 positioner 가 같은 자리를 지나는 순간은 원 fit 의 robust 가중치가
+거른다). 점이 5개 미만이면 그 positioner 는 비워 둔다.
 
 ## mock 데이터로 돌려보기
 
