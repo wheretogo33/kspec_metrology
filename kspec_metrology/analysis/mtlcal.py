@@ -476,9 +476,16 @@ def measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, max_dist=None, 
     if np.unique(j[:nfib]).size != nfib:
         log.warning("Fiber matching is not unique: %d fibers share a peak",
                     nfib-np.unique(j[:nfib]).size)
-    if max_dist is not None and (dist[:nfib] > max_dist).any():
-        log.warning("%d fiber(s) matched farther than %.2f mm from the target (max %.2f mm)",
-                    int((dist[:nfib] > max_dist).sum()), max_dist, dist[:nfib].max())
+    if max_dist is None:
+        max_dist = 3.0                                   # fiber 최소 이격(~3 mm) 정도
+    far = np.where(dist[:nfib] > max_dist)[0]
+    if far.size:
+        ids = list(cfg.fiber_ids())
+        alive = [i for i, d in zip(ids, cfg.dead_mask()) if not d]
+        log.warning("%d fiber(s) matched farther than %.1f mm from the target: %s -- "
+                    "the fiber may be unlit (add to FIBER_EXCLUDE) or the matched spot may be "
+                    "another fiber / sky fiber", far.size, max_dist,
+                    ", ".join(f"{alive[i]} ({dist[i]:.1f} mm)" for i in far))
     log.info("Fiber image (%s): %d peaks; fiber-target distance median %.1f um, max %.1f um",
              head, xobs.size, np.median(dist[:nfib])*1e3, dist[:nfib].max()*1e3)
     return xf[j], yf[j], dist, (xobs[j], yobs[j])
