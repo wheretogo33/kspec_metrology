@@ -208,8 +208,10 @@ def show_image(im, n=8, ax=None, title=None, vmax_pct=99.5):
     if ax is None:
         _, ax = plt.subplots(figsize=(13, 10))
     lo, hi = np.percentile(small, [1, vmax_pct])
-    ax.imshow(small, cmap='gray', vmin=lo, vmax=hi,
-              extent=(-.5, small.shape[1]*n - .5, small.shape[0]*n - .5, -.5))
+    # test_260917.ipynb 와 같은 방향: origin='lower' (v 가 위로 커진다). 이미지는 findpeak 처럼
+    # [::-1, :] 로 뒤집어 읽은 것이라 이렇게 그리면 배치표(초점면 x, y)와 바로 견줄 수 있다.
+    ax.imshow(small, cmap='gray', vmin=lo, vmax=hi, origin='lower',
+              extent=(-.5, small.shape[1]*n - .5, -.5, small.shape[0]*n - .5))
     ax.set_xlabel('u [px]'); ax.set_ylabel('v [px]')
     if title:
         ax.set_title(title)
@@ -428,7 +430,7 @@ def check_peaks(fits_path, threshold=3e3, min_dist=40, finder='sep', finder_opts
         for a, i in zip(axs.ravel(), order):
             uu, vv = int(round(T.u[i])), int(round(T.v[i]))
             sub = im[max(vv-crop, 0):vv+crop+1, max(uu-crop, 0):uu+crop+1]
-            a.imshow(np.log10(np.clip(sub - np.median(sub), 3, None)), cmap='inferno')
+            a.imshow(np.log10(np.clip(sub - np.median(sub), 3, None)), cmap='inferno', origin='lower')
             a.set_title(f'peak {T.peak[i]:.0f}  near {T.nearest_px[i]:.0f}px', fontsize=7); a.set_xticks([]); a.set_yticks([])
         for a in axs.ravel()[k:]:
             a.axis('off')
