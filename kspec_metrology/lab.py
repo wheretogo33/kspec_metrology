@@ -293,6 +293,7 @@ def _inspect(data_dir, head, fid_heads, target_file, nexposure=1, fid_nexposure=
     x, y, fid_flag = x[~dead], y[~dead], fid_flag[~dead]
     ids = [i for i, d in zip(ids, dead) if not d]
     nfib = int((~dead[:nfib]).sum())
+    n_extra = n_extra + len(cfg.FIBER_FIXED) + len(cfg.SKY_FIBERS)   # 켜져 있지만 무시하는 점 (mtlcal 과 같다)
     pk = dict(threshold=threshold, nwindow=nwindow, niter_recenter=niter_recenter, finder=finder,
               finder_opts=finder_opts, background=background, background_opts=background_opts,
               min_dist=min_dist)

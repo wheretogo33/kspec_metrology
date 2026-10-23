@@ -24,7 +24,7 @@ LabTest_README.md            이 파일
 
 **fiber 표**: 패키지 기본 `analysis/Fiber_Configuration_config73.txt`
 (positioner 73 + fiducial 30). 바깥 sky fiber 9개 홀은 −9 로 표에서 빠져 있고,
-켜져 있으면 `N_EXTRA = 9` 로 "표에 없는 밝은 점" 으로 처리한다.
+켜져 있으면 `SKY_FIBERS` 에 그 홀 ID 를 적는다 (아래).
 
 **목표 파일**: `object.info` 와 같은 json. 배열은 표의 positioner 순서(73개).
 
@@ -42,8 +42,18 @@ LabTest_README.md            이 파일
 | fiducial 따로 (case 1) | fiber 노출 | `[fiducial 노출]` |
 | fiducial 두 노출 (case 2) | fiber 노출 | `[t1_1, t1_2]` (fiducial 마다 포화 안 된 밝은 쪽) |
 
-**끊어진 fiber**: 노트북 1절의 `BROKEN_FIBERS = ['C4']` 처럼 ID 를 적는다. 표와
-목표 파일은 그대로 두고 그 fiber 만 이미지에서 찾지 않는다 (결과는 NaN / 회전량 0).
+**못 쓰는 홀 (ID 만 적는다, 위치 불필요)**: 노트북 1절. 표와 목표 파일(73개)은 그대로 둔다.
+
+| 목록 | 뜻 | 처리 |
+|---|---|---|
+| `BROKEN_FIBERS = ['G4']` | 끊어져 빛이 안 나오는 fiber | 이미지에서 찾지 않음. 결과 NaN, 회전량 0 |
+| `FIXED_FIBERS = ['C6']` | 빛은 나오지만 고장나 움직이지 않는 positioner | 그 홀의 arm 도달 범위 안이고 다른 목표에서 3 mm 넘게 떨어진 검출을 후보에서 뺌. 결과 NaN, 회전량 0 |
+| `SKY_FIBERS = ['A6', ...]` | 켜져 있는 sky fiber 홀 9개 | 같은 방식으로 뺌. 꺼져 있으면 `[]` |
+
+기대 검출 개수 = 73 − 끊어진 수 + sky 수 (고정된 positioner 는 73 안에 있다).
+남은 목표와 검출은 1:1 assignment 로 매칭되고, 3 mm 넘게 떨어져 매칭된 fiber 는 ID 와 함께 경고가 난다.
+`N_EXTRA` 는 이들 외의 여분 밝은 점(반사광 등)만 센다 (보통 0).
+환경변수 `KSPEC_FIBER_EXCLUDE`, `KSPEC_FIBER_FIXED`, `KSPEC_SKY_FIBERS` 와 같다.
 
 **각도 부호**: 노트북 1절의 `ANGLE_SIGN`. 출력 각도 = 부호 × 계산각. 기본 `(1, 1)`:
 alpha 는 초점면 +x 에서 반시계가 양, beta 는 항상 0 이상 (2026-10-23 실험실에서
@@ -79,7 +89,7 @@ alpha 는 초점면 +x 에서 반시계가 양, beta 는 항상 0 이상 (2026-1
 ```python
 from kspec_metrology_LabTest import lab
 res = lab.measure(target_file, fiber_image, [fid1, fid2], out_dir='lab_out',
-                  magnification=8.40, model='radial+affine', n_extra=9)
+                  magnification=8.40, model='radial+affine')   # FIXED/SKY 는 환경변수 또는 cfg 목록으로
 lab.offsets_table(res)      # fiber 별 표
 lab.show_steps(res)         # 단계별 그림
 ```
