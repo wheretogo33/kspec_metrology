@@ -118,7 +118,9 @@ def arm_calibration(fiber_images, fid_images=None, target_file=None, reach=None,
                                              magnification, model, **pk)
         centres = np.column_stack((xo, yo))
         tree = cKDTree(np.column_stack((xf, yf)))
-        for i, (cx, cy) in zip(ids, centres):
+        for i, (cx, cy), dd in zip(ids, centres, dead):
+            if dd:
+                continue                                  # 끊어진 fiber: 궤적이 없다
             near = tree.query_ball_point((cx, cy), reach)
             if not near:
                 continue
