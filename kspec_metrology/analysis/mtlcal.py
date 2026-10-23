@@ -412,6 +412,7 @@ def mtlcal(data_dir='./MTL/data/'
            , fid_min_peak=0.
            , n_extra=0
            , cross_exclude=True
+           , min_dist=40
            , target_file=None
            , json_dir=None
            , target_name=None
@@ -436,6 +437,7 @@ def mtlcal(data_dir='./MTL/data/'
     sat_level 은 포화 판정 수준 [ADU], fid_min_peak 은 fiducial 노출을 고를 때 이보다
     어두운 검출을 피하는 기준이다. n_extra 는 표에 없는데 이미지에 보이는 밝은 점의 수
     (예: 고정된 sky fiber 9개). 그만큼 검출을 더 허용하고 매칭에서 자연히 빠진다.
+    min_dist 는 가까운 검출을 하나로 합치는 거리 [px] (findpeak 참고; 큰 PSF 면 80 정도).
     cross_exclude (기본 True) 는 노출을 나눠 찍었을 때 fiber 노출의 fiducial 자리와
     fiducial 노출의 fiber 자리를 서로 지우고 찾는 것이다 (양쪽 다 켜 놓고 찍은 경우).
 
@@ -479,7 +481,7 @@ def mtlcal(data_dir='./MTL/data/'
 
     pk = dict(threshold=threshold, nwindow=nwindow, niter_recenter=niter_recenter,
               finder=finder, finder_opts=finder_opts, background=background,
-              background_opts=background_opts)
+              background_opts=background_opts, min_dist=min_dist)
 
     # 끊어진 fiber (fiber_config.FIBER_EXCLUDE): 찾지 않고 매칭에서 뺀다. 배열 순서는 그대로.
     # cross_exclude: 노출을 나눠 찍었는데 fiber 노출에 fiducial 이, fiducial 노출에 fiber 가

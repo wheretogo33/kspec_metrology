@@ -275,7 +275,7 @@ def _inspect(data_dir, head, fid_heads, target_file, nexposure=1, fid_nexposure=
              threshold=3e3, nwindow=40, niter_recenter=0, finder='sep', finder_opts=None,
              background='crop', background_opts=None, magnification=None, model='full',
              sat_level=65000., fid_min_peak=0., n_extra=0, use_measured=None,
-             apply_pinhole_offset=False, cross_exclude=True, n=8):
+             apply_pinhole_offset=False, cross_exclude=True, min_dist=40, n=8):
     """mtlcal 과 같은 설정으로 단계별로 다시 분석하며 그림을 그린다. json 은 건드리지 않는다."""
     from kspec_metrology.analysis.mtlcal import (load_configuration, measure_fiducials,
                                                  measure_fibers)
@@ -288,7 +288,8 @@ def _inspect(data_dir, head, fid_heads, target_file, nexposure=1, fid_nexposure=
     ids = [i for i, d in zip(ids, dead) if not d]
     nfib = int((~dead[:nfib]).sum())
     pk = dict(threshold=threshold, nwindow=nwindow, niter_recenter=niter_recenter, finder=finder,
-              finder_opts=finder_opts, background=background, background_opts=background_opts)
+              finder_opts=finder_opts, background=background, background_opts=background_opts,
+              min_dist=min_dist)
     fid_nexposure = nexposure if fid_nexposure is None else fid_nexposure
     im = load_frames(data_dir, head, nexposure)
     if fid_heads:
@@ -350,6 +351,51 @@ def inspect_trial(run, itrial, n=8):
                     apply_pinhole_offset=run.apply_pinhole_offset, n=n)
 
 
+# ============================================================================ 검출 점검
+def check_peaks(fits_path, threshold=3e3, min_dist=40, finder='sep', finder_opts=None, background='crop',
+                nwindow=40, exclude=None, exclude_r=60, n=8, crop=60, show_crops=24):
+    """이미지 한 장에서 peak 검출만 해 보고 (findpeak 과 같은 길), 개수·밝기·서로 가까운 쌍을
+    표와 그림으로 보여 준다. 한 spot 이 여러 peak 으로 쪼개지는지, threshold 가 맞는지,
+    min_dist / finder_opts 를 어떻게 잡을지 정할 때 쓴다.
+
+    문턱값 탐색 없이 threshold 그대로 한 번 돌린다.
+    반환: pandas DataFrame(u, v, peak, nearest_px) -- nearest_px 는 가장 가까운 다른 검출까지 거리."""
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    from scipy.spatial import cKDTree
+    d = os.path.dirname(os.path.abspath(fits_path))
+    base = os.path.basename(fits_path)
+    if not base.endswith('0.fits'):
+        raise ValueError("파일 이름이 ...0.fits 로 끝나야 한다 (findpeak 의 이름 규칙)")
+    head = base[:-len('0.fits')]
+    im, xo, yo, pk = findpeak((1, 100000), data_dir=d, head=head, nexposure=1, threshold=threshold,
+                              niter_max=1, min_dist=min_dist, finder=finder, finder_opts=finder_opts,
+                              background=background, nwindow=nwindow, exclude=exclude, exclude_r=exclude_r)
+    u, v = chip2pix(xo, yo, im.shape)
+    dd = cKDTree(np.c_[u, v]).query(np.c_[u, v], k=2)[0][:, 1] if u.size > 1 else np.full(u.size, np.nan)
+    T = pd.DataFrame(dict(u=u, v=v, peak=pk, nearest_px=dd)).sort_values('peak', ascending=False).reset_index(drop=True)
+    close = T[T.nearest_px < 3*min_dist]
+    print(f"{base}: {len(T)} peaks at threshold {threshold:.0f} (min_dist {min_dist} px); "
+          f"peak {T.peak.min():.0f}..{T.peak.max():.0f}; {len(close)} within {3*min_dist} px of another peak "
+          f"({'split spots?' if len(close) else 'ok'})")
+    show_detections(im, xo, yo, flag=(dd < 3*min_dist), n=n, r=max(60, min_dist),
+                    title=f'{base}: {len(T)} peaks (orange = closer than {3*min_dist} px to another)')
+    k = min(show_crops, len(T))
+    if k:
+        ncol = 8; nrow = int(np.ceil(k/ncol))
+        fig, axs = plt.subplots(nrow, ncol, figsize=(2.2*ncol, 2.3*nrow), squeeze=False)
+        order = np.argsort(T.nearest_px.values)[:k]            # 가까운 쌍부터
+        for a, i in zip(axs.ravel(), order):
+            uu, vv = int(round(T.u[i])), int(round(T.v[i]))
+            sub = im[max(vv-crop, 0):vv+crop+1, max(uu-crop, 0):uu+crop+1]
+            a.imshow(np.log10(np.clip(sub - np.median(sub), 3, None)), cmap='inferno')
+            a.set_title(f'peak {T.peak[i]:.0f}  near {T.nearest_px[i]:.0f}px', fontsize=7); a.set_xticks([]); a.set_yticks([])
+        for a in axs.ravel()[k:]:
+            a.axis('off')
+        fig.tight_layout()
+    return T
+
+
 # ============================================================================ 한 번 측정
 def read_targets(path):
     """목표 파일 -> (xp, yp, kind). object.info 와 같은 json 이고 셋 중 하나를 담는다.
@@ -390,7 +436,7 @@ def measure(target_file, fiber_image, fid_images=(), out_dir='./lab_out', tile='
             magnification=None, model='full', nwindow=40, threshold=3e3, niter_recenter=0,
             finder='sep', finder_opts=None, background='crop', background_opts=None,
             sat_level=65000., fid_min_peak=0., n_extra=0, use_measured=None, mode='Raw',
-            cross_exclude=True):
+            cross_exclude=True, min_dist=40):
     """한 배치를 한 번 잰다: 목표 파일과 이미지 1-3장 -> fiber 위치 오차와 positioner 회전량.
 
     target_file : object.info 형식 (read_targets 참고; xp/yp 또는 각도)
@@ -454,7 +500,7 @@ def measure(target_file, fiber_image, fid_images=(), out_dir='./lab_out', tile='
                   finder=finder, finder_opts=finder_opts, background=background,
                   background_opts=background_opts, magnification=magnification, model=model,
                   sat_level=sat_level, fid_min_peak=fid_min_peak, n_extra=n_extra,
-                  use_measured=use_measured, cross_exclude=cross_exclude)
+                  use_measured=use_measured, cross_exclude=cross_exclude, min_dist=min_dist)
     dx, dy, angle_rot, angle_cum = mtlcal(data_dir=data_dir, head=head, nexposure=1,
                                           fid_head=fid_heads or None, target_file=tfile,
                                           json_dir=out_dir, target_name=tile, itrial=itrial, **params)

@@ -121,6 +121,7 @@ class MetrologyRun:
         sat_level   : 포화 판정 수준 [ADU]
         fid_min_peak : fiducial 노출을 고를 때 이보다 어두운 검출은 피한다 [ADU]
         n_extra     : 표에 없는데 이미지에 보이는 밝은 점의 수 (고정 sky fiber 등)
+        min_dist    : 가까운 검출을 하나로 합치는 거리 [px] (findpeak 참고)
         tile        : 파일 이름에 쓸 타일 이름. None이면 target 파일에서 읽는다
     """
 
@@ -154,6 +155,7 @@ class MetrologyRun:
                  , sat_level=65000.
                  , fid_min_peak=0.
                  , n_extra=0
+                 , min_dist=40
                  , tile=None):
 
         if metric not in ('max', 'median'):
@@ -200,6 +202,7 @@ class MetrologyRun:
         self.sat_level = sat_level
         self.fid_min_peak = fid_min_peak
         self.n_extra = n_extra
+        self.min_dist = min_dist
 
         self.nfib = len(cfg.fiber_ids())
 
@@ -297,6 +300,7 @@ class MetrologyRun:
                       , sat_level=self.sat_level
                       , fid_min_peak=self.fid_min_peak
                       , n_extra=self.n_extra
+                      , min_dist=self.min_dist
                       , target_file=self.target_file
                       , json_dir=self.json_dir
                       , target_name=self.tile

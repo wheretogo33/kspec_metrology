@@ -29,6 +29,7 @@ def findpeak(npeaks
             , sat_level=65000.
             , exclude=None
             , exclude_r=60
+            , min_dist=40
             , ReturnFiberImage=False
             , ReturnSpotSize=False
             , ReturnNsat=False):
@@ -41,6 +42,9 @@ def findpeak(npeaks
         nmax 를 넘으면 어두운 것부터 버리고, nmin 에 못 미치면 예외를 낸다.
     sat_level : 포화 수준 [ADU, 배경 빼기 전]. ReturnNsat 때 창 안의 포화 화소 수를
         센다 (fiducial 노출을 고를 때 쓴다).
+    min_dist : 검출된 peak 가운데 이보다 가까운 것은 하나로 합친다 [px] (밝은 쪽을 남김).
+        spot 이 크거나 둘로 갈라져 보이면 (실험실 PSF) sep 이 한 spot 을 여러 개로
+        쪼개므로 spot 크기보다 크게(예: 80) 잡는다. 이웃 spot 간격보다는 작아야 한다.
     exclude : (xchip, ychip) 칩 좌표 [mm] 배열. 그 자리 반지름 exclude_r [px] 안을 배경값으로
         덮은 뒤 peak 을 찾는다. fiber 노출에 fiducial 이 같이 찍혔을 때(또는 그 반대)
         이미 아는 쪽을 지우는 데 쓴다. 'Raw' 모드에서만 뜻이 있다.
@@ -139,7 +143,7 @@ def findpeak(npeaks
         for niter in range(1, niter_max+1):
             peak_table_raw = peakfind.find(im, threshold_temp,
                                            method=finder, options=fopts)
-            peak_table = dedupe_peaks_kdtree(peak_table_raw, min_dist=40)
+            peak_table = dedupe_peaks_kdtree(peak_table_raw, min_dist=min_dist)
             nfound = len(peak_table)
             log.info("Iteration %d: threshold %.4g -> %d peaks (target %s)",
                      niter, threshold_temp, nfound,
