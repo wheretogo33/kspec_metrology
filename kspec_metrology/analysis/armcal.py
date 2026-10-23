@@ -100,6 +100,10 @@ def arm_calibration(fiber_images, fid_images=None, target_file=None, reach=None,
     pk           : findpeak 인자 (threshold, nwindow, min_dist, finder_opts, background ...)
 
     반환: ArmCalResult (table: id, x0, y0, R, rms, n, dx, dy = 설계 중심과의 차이 [mm])"""
+    fiber_images = list(fiber_images)
+    if not fiber_images:
+        raise ValueError('arm_calibration: no scan images given (fiber_images is empty)')
+
     import json, tempfile
     import pandas as pd
     log = get_logger()
