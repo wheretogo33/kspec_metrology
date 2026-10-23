@@ -4,6 +4,7 @@ import os
 import numpy as np
 from astropy.io import ascii
 from scipy.spatial import cKDTree
+from scipy.optimize import linear_sum_assignment
 
 from kspec_metrology.analysis.findpeak import findpeak
 from kspec_metrology.analysis.matchfiber import matchfiber
@@ -372,8 +373,9 @@ def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
         _, xobs, yobs, peak, nsat = findpeak((nmin, nmax), data_dir=data_dir, head=head,
                                              nexposure=nexp, sat_level=sat_level,
                                              exclude=exclude, ReturnNsat=True, **pk)
-        if xobs.size > nfid:
-            # fiber 도 보인다: 전체 패턴으로 매칭하고 fiducial 자리만 쓴다
+        if xobs.size > nfid and exclude is None:
+            # fiber 도 보인다: 전체 패턴으로 매칭하고 fiducial 자리만 쓴다 (fiber 자리를 지운 뒤라면
+            # 남은 여분은 고정 점·sky fiber 뿐이므로 fiducial 패턴만으로 매칭한다)
             imatch, theta_guess, (xoff, yoff) = matchfiber(x, y, xobs, yobs, m_init=m_init)
             imatch = imatch[fid_flag]
         else:
@@ -414,9 +416,11 @@ def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
     def _predict(st, zz_x, zz_y):
         f = st['found']
         if f.sum() >= 10:
+            # 쌍이 넉넉하면 전체 왜곡 모델 (시야 가장자리 외삽이 좋아진다)
+            mdl = 'full+affine' if f.sum() >= 18 else 'radial+affine'
             _, _, _, _, cf = fitdistortion(xf[f], yf[f], np.ones(int(f.sum()), bool), st['x'][f], st['y'][f],
                                            np.arange(int(f.sum())), st['theta'], *st['off'],
-                                           model='radial+affine', m_init=m_init)
+                                           model=mdl, m_init=m_init)
             px, py = transform(st['x'][f], st['y'][f], cf)
             err = np.hypot(px - xf[f], py - yf[f])
             return transform(zz_x, zz_y, cf), err
@@ -453,6 +457,22 @@ def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
             ref = max(range(len(sets)), key=lambda k: int(sets[k]['found'].sum()))
             if not improved:
                 break
+        # 마지막으로, 아직 못 찾은 fiducial 은 허용 거리를 두 배로 늘려 한 번 더 (가장자리 외삽 오차)
+        for k, st in enumerate(sets):
+            if st['found'].all():
+                continue
+            (px, py), _ = _predict(sets[ref], st['all_x'], st['all_y'])
+            d, j = cKDTree(np.column_stack((px, py))).query(np.column_stack((xf, yf)))
+            used = set(np.where(st['found'])[0].tolist())
+            taken = set(np.unique(st['all_x'].size and np.array([np.argmin(np.hypot(st['all_x'] - st['x'][i], st['all_y'] - st['y'][i])) for i in used])) if used else [])
+            extra = 0
+            for i in np.where(~st['found'])[0]:
+                if d[i] < 2*match_tol and j[i] not in taken:
+                    st['x'][i], st['y'][i] = st['all_x'][j[i]], st['all_y'][j[i]]
+                    st['peak'][i], st['nsat'][i] = st['all_peak'][j[i]], st['all_nsat'][j[i]]
+                    st['found'][i] = True; taken.add(j[i]); extra += 1
+            if extra:
+                log.info("Fiducial set %d: %d more found within %.1f mm", k, extra, 2*match_tol)
 
     fallback = [False]*len(sets) if fallback is None else list(fallback)
     choice = np.full(nfid, -1, dtype=int)
@@ -501,21 +521,39 @@ def measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, max_dist=None, 
     _, xobs, yobs, _ = findpeak((nfib, nmax), data_dir=data_dir, head=head,
                                 nexposure=nexposure, exclude=exclude, **pk)
     xf, yf = transform(xobs, yobs, coeff)
-    fixed = cfg.fixed_spots()
-    if fixed:
-        # 고정된 점(sky fiber, 고장난 positioner) 자리의 검출은 fiber 후보에서 뺀다
-        fx = np.array([v[0] for v in fixed.values()]); fy = np.array([v[1] for v in fixed.values()])
-        dfix, _ = cKDTree(np.column_stack((fx, fy))).query(np.column_stack((xf, yf)))
-        keep = dfix > cfg.FIXED_SPOT_TOL
-        log.info("Fixed spots (%s): %d detection(s) removed from the fiber candidates",
-                 os.path.basename(cfg.FIXED_SPOTS_PATH), int((~keep).sum()))
-        xobs, yobs, xf, yf = xobs[keep], yobs[keep], xf[keep], yf[keep]
-    dist, j = cKDTree(np.column_stack((xf, yf))).query(np.column_stack((x, y)))
-    if np.unique(j[:nfib]).size != nfib:
-        log.warning("Fiber matching is not unique: %d fibers share a peak",
-                    nfib-np.unique(j[:nfib]).size)
     if max_dist is None:
         max_dist = 3.0                                   # fiber 최소 이격(~3 mm) 정도
+    keep = np.ones(xf.size, bool)
+    fixed = cfg.fixed_spots()
+    if fixed:
+        # 자리를 아는 고정 점 (Fixed_Spots.txt): 그 자리의 검출은 fiber 후보에서 뺀다
+        fx = np.array([v[0] for v in fixed.values()]); fy = np.array([v[1] for v in fixed.values()])
+        dfix, _ = cKDTree(np.column_stack((fx, fy))).query(np.column_stack((xf, yf)))
+        keep &= dfix > cfg.FIXED_SPOT_TOL
+        log.info("Fixed spots (%s): %d detection(s) removed from the fiber candidates",
+                 os.path.basename(cfg.FIXED_SPOTS_PATH), int((dfix <= cfg.FIXED_SPOT_TOL).sum()))
+    holes = cfg.lit_unmatched_holes()
+    if len(holes):
+        # 자리는 모르고 홀만 아는 고정 점 (FIBER_FIXED, SKY_FIBERS): 그 홀 중심에서 arm 길이 안에
+        # 있으면서 살아 있는 fiber 의 목표에서 max_dist 보다 먼 검출을 그 점으로 본다
+        a1, a2 = cfg.arm_lengths()
+        reach = float((a1 + a2).max()) + 1.0
+        dh, _ = cKDTree(holes).query(np.column_stack((xf, yf)))
+        dt, _ = cKDTree(np.column_stack((x[:nfib], y[:nfib]))).query(np.column_stack((xf, yf)))
+        stuck = (dh < reach) & (dt > max_dist)
+        keep &= ~stuck
+        log.info("Lit but unmatched holes (%d fixed positioner(s), %d sky fiber(s)): %d detection(s) "
+                 "taken as theirs and removed", len(cfg.FIBER_FIXED), len(cfg.SKY_FIBERS), int(stuck.sum()))
+    xobs, yobs, xf, yf = xobs[keep], yobs[keep], xf[keep], yf[keep]
+    # 목표 <-> 검출 할당: 한 검출은 한 목표에만 (거리 합 최소). 너무 먼 짝은 큰 비용으로 막는다.
+    D = np.hypot(x[:, None] - xf[None, :], y[:, None] - yf[None, :])
+    C = np.where(D > 3*max_dist, 1e6 + D, D)
+    rows, cols = linear_sum_assignment(C)
+    j = np.zeros(x.size, dtype=int); dist = np.full(x.size, np.inf)
+    j[rows] = cols; dist[rows] = D[rows, cols]
+    unassigned = np.setdiff1d(np.arange(x.size), rows)
+    for i in unassigned:                                 # 검출이 모자라면 가장 가까운 것 (경고 대상)
+        j[i] = int(np.argmin(D[i])); dist[i] = D[i, j[i]]
     far = np.where(dist[:nfib] > max_dist)[0]
     if far.size:
         ids = list(cfg.fiber_ids())
@@ -624,14 +662,18 @@ def mtlcal(data_dir='./MTL/data/'
               finder=finder, finder_opts=finder_opts, background=background,
               background_opts=background_opts, min_dist=min_dist)
 
-    # 끊어진 fiber (fiber_config.FIBER_EXCLUDE): 찾지 않고 매칭에서 뺀다. 배열 순서는 그대로.
+    # 끊어진 fiber (FIBER_EXCLUDE) 와 고장나 고정된 positioner (FIBER_FIXED): 매칭에서 뺀다.
+    # 배열 순서는 그대로. 고정된 positioner 와 sky fiber (SKY_FIBERS) 는 이미지에 켜져 있으므로
+    # 검출 개수 상한에 더한다 (measure_fibers 가 홀 근처에서 걸러낸다).
     # cross_exclude: 노출을 나눠 찍었는데 fiber 노출에 fiducial 이, fiducial 노출에 fiber 가
     # 같이 찍힌 경우. fiducial 노출에서 찾은 fiducial 자리를 fiber 노출에서 지우고 fiber 를
     # 찾은 뒤, 그 fiber 자리를 fiducial 노출에서 지우고 fiducial 을 한 번 더 찾는다.
     dead = np.r_[cfg.dead_mask(), np.zeros(x.size-nfib, dtype=bool)]
-    if dead.any():
-        log.info("Excluded fiber(s) (not expected in the image): %s",
-                 ", ".join(h for h, d in zip(cfg.fiber_ids(), dead[:nfib]) if d))
+    n_extra = n_extra + len(cfg.FIBER_FIXED) + len(cfg.SKY_FIBERS)
+    if dead.any() or cfg.SKY_FIBERS:
+        log.info("Excluded fiber(s): broken %s; fixed (lit, not matched) %s; sky fibers %s",
+                 [h for h in cfg.fiber_ids() if h in cfg.FIBER_EXCLUDE] or '-',
+                 list(cfg.FIBER_FIXED) or '-', list(cfg.SKY_FIBERS) or '-')
     xa, ya, fa = x[~dead], y[~dead], fid_flag[~dead]
     nfib_a = int((~dead[:nfib]).sum())
 

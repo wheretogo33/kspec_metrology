@@ -120,7 +120,8 @@ class MetrologyRun:
                       광학계(실험실)에서는 꼭 준다 (utils.CAMERA2FOCAL_M 참고)
         sat_level   : 포화 판정 수준 [ADU]
         fid_min_peak : fiducial 노출을 고를 때 이보다 어두운 검출은 피한다 [ADU]
-        n_extra     : 표에 없는데 이미지에 보이는 밝은 점의 수 (고정 sky fiber 등)
+        n_extra     : 표에 없는데 이미지에 보이는 밝은 점의 수. FIBER_FIXED / SKY_FIBERS 에
+                      적은 것은 자동으로 세므로, 그 밖의 점(반사광 등)만 적는다
         min_dist    : 가까운 검출을 하나로 합치는 거리 [px] (findpeak 참고)
         auto_exposure : 찍은 이미지에 포화 화소가 sat_max_pixels 보다 많으면 노출을
                       exposure_factor 배로 줄여 다시 찍는다 (최대 max_retry 번). 줄인 노출은

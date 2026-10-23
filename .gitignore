@@ -15,6 +15,9 @@
 kspec_metrology/.claude/
 kspec_metrology/**/*.ipynb
 kspec_metrology/*.ipynb
+!kspec_metrology/notebooks/
+!kspec_metrology/notebooks/*.ipynb
+!kspec_metrology/notebooks/README.md
 **/__pycache__/
 *.py[cod]
 

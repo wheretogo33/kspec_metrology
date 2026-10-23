@@ -238,12 +238,25 @@ target 파일(object.info) 에 `xp`/`yp` 대신 각도를 적어도 된다: `{"a
 
 ### 켜져 있지만 무시할 점 (sky fiber, 고장난 positioner)
 
-`analysis/Fixed_Spots.txt` 에 초점면 좌표 [mm] 를 적는다 (`name X Y`; 경로는
-`KSPEC_FIXED_SPOTS`). 그 자리 1.5 mm (`fiber_config.FIXED_SPOT_TOL`) 안의 검출은 fiber
-후보에서 빠진다. 고장나 움직이지 않는 positioner 는 여기에 fiber 자리를 적고
-`FIBER_EXCLUDE` 에도 넣는다 (목표·json 에서 빠짐). 검출 개수 상한은 `n_extra` 로 늘려
-둔다 (sky fiber 9개면 9). 좌표를 모르는 동안은 `n_extra` 만으로도 돌아가지만, 그 점이
-어느 fiber 의 목표보다 가까이 있으면 잘못 붙을 수 있어 좌표를 적어 두는 쪽이 안전하다.
+홀 ID 만 알면 된다. 위치 정보는 필요 없다.
+
+```python
+# analysis/fiber_config.py
+FIBER_FIXED = ['C6']                                     # 빛은 나오지만 고장나 움직이지 않는 positioner
+SKY_FIBERS  = ['A6', 'B7', 'B8', 'G0', 'H1', 'I0', 'N7', 'N8', 'O6']   # sky fiber 홀 (표에서 -9)
+```
+(환경변수 `KSPEC_FIBER_FIXED`, `KSPEC_SKY_FIBERS` 로도 된다.)
+
+- `FIBER_FIXED` 의 positioner 는 object.info 와 json 에 그대로 들어 있되(순서 유지) 목표
+  매칭에서 빠진다 (오차 NaN, 회전량 0). 이미지에서는 켜져 있다고 보고 검출 개수에 센다.
+- 두 목록의 홀 중심에서 arm 길이 + 1 mm 안에 있으면서, 살아 있는 fiber 의 목표에서 3 mm
+  (`max_dist`) 보다 먼 검출을 그 점으로 보고 fiber 후보에서 뺀다. 나머지 fiber 는 목표와
+  검출을 거리 합이 최소가 되게 일대일로 붙인다(할당 문제). 목표에서 3 mm 넘게 떨어진 매칭은
+  ID 와 함께 경고가 난다.
+- 자리를 정확히 아는 점은 `analysis/Fixed_Spots.txt` (`name X Y`, 1.5 mm) 로 적어도 된다.
+- 남는 위험: 고정된 점이 어떤 살아 있는 fiber 의 목표 3 mm 안에 있고 그 fiber 의 진짜 spot
+  보다 가까울 때. 첫 trial 에서 fiber 가 목표에서 mm 단위로 벗어나 있으면 생길 수 있으므로
+  `fiber - target` 이 큰 fiber 의 경고를 확인한다.
 
 ### 끊어진 fiber
 
@@ -515,6 +528,13 @@ INFO Recentering shift [px]: median 3.2, 95% 7.1, max 8.5 (limit 20)
 `fiber_config.TARGET_INFO_PATH` 의 기본값은 관측 시스템 경로
 (`/home/kspecmtl/work/KSPEC_ICS/MTL/target/object.info`) 이므로, 다른
 환경에서는 `target_file` 인자로 직접 넘겨야 한다.
+
+## 디버깅용 노트북
+
+`kspec_metrology/notebooks/` 에 세 개가 들어 있다 (`notebooks/README.md`).
+`Metrology_Debug.ipynb` (한 trial 을 단계별로), `Calibration_Run.ipynb` (모든 arm 을 같은
+각도로 둔 배치), `Arm_Scan.ipynb` (회전 중심·arm 길이). 운용 스크립트가 쓰는 함수를 그대로
+부르므로 같은 이미지로 같은 결과가 나온다.
 
 ## positioner 회전 중심 · arm 길이 측정 (arm scan)
 

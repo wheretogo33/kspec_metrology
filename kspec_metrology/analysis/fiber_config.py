@@ -337,9 +337,47 @@ if os.environ.get(FIBER_EXCLUDE_ENV, '').strip():      # 환경변수가 있으�
                      os.environ[FIBER_EXCLUDE_ENV].replace(';', ',').split(',') if t.strip()]
 
 
-# 켜져 있지만 움직이지 않는 점들 (sky fiber 9개, 고장나 고정된 positioner 의 fiber).
-# 초점면 좌표 [mm] 를 파일에 적어 두면 그 자리(반지름 FIXED_SPOT_TOL)의 검출은 fiber 매칭에서
-# 뺀다. 고장난 positioner 는 FIBER_EXCLUDE 에도 넣어 목표·json 에서 빼야 한다.
+# 빛은 나오지만 움직이지 않는 것들. 홀 ID 만 알면 된다 (위치는 몰라도 된다).
+#   FIBER_FIXED : 고장나서 고정된 positioner 의 홀 ID (표의 positioner). 목표·json 에서는
+#                 FIBER_EXCLUDE 처럼 빠지고(회전량 0, 오차 NaN), 이미지에서는 켜져 있다고 본다.
+#   SKY_FIBERS  : sky fiber 가 꽂힌 홀 ID (표에서 -9 인 홀). 켜져 있다고 본다.
+# 둘 다 "그 홀 중심에서 arm 길이 안에 있으면서 살아 있는 fiber 의 목표 근처는 아닌" 검출을
+# 그 점으로 보고 fiber 매칭에서 뺀다. 자리를 정확히 아는 경우는 아래 Fixed_Spots 파일.
+#   환경변수 : KSPEC_FIBER_FIXED="C6"   KSPEC_SKY_FIBERS="A6,B7,B8,G0,H1,I0,N7,N8,O6"
+FIBER_FIXED = []                         # <- 고장나 고정된 positioner 홀 ID. 예: ['C6']
+SKY_FIBERS = []                          # <- sky fiber 홀 ID (표에서 -9 인 홀). 예: ['A6', 'B7', 'B8', ...]
+for _env, _name in (('KSPEC_FIBER_FIXED', 'FIBER_FIXED'), ('KSPEC_SKY_FIBERS', 'SKY_FIBERS')):
+    if os.environ.get(_env, '').strip():
+        globals()[_name] = [t.strip() for t in os.environ[_env].replace(';', ',').split(',') if t.strip()]
+
+
+def fixed_mask():
+    """fiber_ids() 순서로, 고장나 고정된 positioner (FIBER_FIXED) 면 True."""
+    ids = list(fiber_ids())
+    unknown = [f for f in FIBER_FIXED if f not in ids]
+    if unknown:
+        raise ValueError(f"FIBER_FIXED 에 표의 positioner 가 아닌 ID 가 있다: {unknown}")
+    return np.array([i in FIBER_FIXED for i in ids], dtype=bool)
+
+
+def hole_xy(hole_ids):
+    """표(FIBER_TABLE_PATH)에서 홀 ID 들의 (x, y) [mm] (flag 와 무관하게 모든 홀)."""
+    tab = ascii.read(FIBER_TABLE_PATH)
+    c = tab.colnames
+    xy = {str(r[c[0]]).strip(): (float(r[c[1]]), float(r[c[2]])) for r in tab}
+    unknown = [h for h in hole_ids if h not in xy]
+    if unknown:
+        raise ValueError(f"표 {FIBER_TABLE_PATH} 에 없는 홀 ID: {unknown}")
+    return np.array([xy[h] for h in hole_ids], dtype=float).reshape(-1, 2)
+
+
+def lit_unmatched_holes():
+    """켜져 있지만 매칭하지 않을 점들의 홀 중심 [(x, y)] = FIBER_FIXED + SKY_FIBERS."""
+    return hole_xy(list(FIBER_FIXED) + list(SKY_FIBERS))
+
+
+# 자리를 정확히 아는 고정 점 (선택). 초점면 좌표 [mm] 를 파일에 적어 두면 그 자리(반지름
+# FIXED_SPOT_TOL)의 검출은 fiber 매칭에서 뺀다. 위 FIBER_FIXED / SKY_FIBERS 와 같이 써도 된다.
 #   # name   X        Y
 #   sky1    47.5   115.18
 #   C6      35.3    97.6     # 고장: 이 자리에 고정
@@ -370,13 +408,13 @@ def fixed_spots(path=None):
 
 
 def dead_mask():
-    """fiber_ids() 순서로, 쓰지 않는(끊어진) fiber 면 True."""
+    """fiber_ids() 순서로, 목표 매칭에서 빼는 fiber 면 True (끊어진 FIBER_EXCLUDE + 고정된 FIBER_FIXED)."""
     ids = list(fiber_ids())
     unknown = [f for f in FIBER_EXCLUDE if f not in ids]
     if unknown:
         raise ValueError(f"FIBER_EXCLUDE 에 표의 positioner 가 아닌 ID 가 있다: {unknown} "
                          f"(표 {FIBER_TABLE_PATH})")
-    return np.array([i in FIBER_EXCLUDE for i in ids], dtype=bool)
+    return np.array([i in FIBER_EXCLUDE for i in ids], dtype=bool) | fixed_mask()
 
 # find_angle_double_method2_select_elbow에 넘기는 자세 정의
 # 출력 각도의 부호 (alpha, beta). json / target 파일의 각도 = 부호 x 계산각(theta, phi).
