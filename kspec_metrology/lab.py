@@ -31,6 +31,7 @@ from kspec_metrology.analysis.matchfiber import matchfiber
 from kspec_metrology.analysis.fitdistortion import fitdistortion
 from kspec_metrology.naming import image_path
 from kspec_metrology import naming
+from kspec_metrology.logging.log import get_logger
 
 PIX_MM = 3.76e-3          # 카메라 화소 크기 [mm]
 rtod = 180./np.pi
@@ -437,6 +438,185 @@ def check_peaks(fits_path, threshold=3e3, min_dist=40, finder='sep', finder_opts
             a.axis('off')
         fig.tight_layout()
     return T
+
+
+
+# ============================================================================ fiducial 밝기 점검
+def fiducial_positions(use_measured=None):
+    """표의 fiducial ID 와 초점면 위치 [mm] (측정 때와 같은 load_configuration 경로)."""
+    import tempfile
+    from kspec_metrology.analysis.mtlcal import load_configuration
+    n = len(cfg.fiber_ids())
+    with tempfile.NamedTemporaryFile('w', suffix='.info', delete=False) as f:
+        json.dump(dict(tile_id='lab', xp=[0.]*n, yp=[0.]*n), f)
+    try:
+        _, _, x, y, fid_flag, nfib = load_configuration(f.name, apply_zenith_offset=False, use_measured=use_measured)
+    finally:
+        os.remove(f.name)
+    ids = _all_ids()
+    return [i for i, fl in zip(ids, fid_flag) if fl], x[fid_flag], y[fid_flag]
+
+
+def _affine_fit(xo, yo, x, y):
+    """칩 (xo, yo) -> 초점면 (x, y) 1차 변환 (최소제곱). 반환: (x, y) 를 내는 함수."""
+    A = np.column_stack((xo, yo, np.ones(xo.size)))
+    cx, _, _, _ = np.linalg.lstsq(A, x, rcond=None)
+    cy, _, _, _ = np.linalg.lstsq(A, y, rcond=None)
+    return lambda u, v: (cx[0]*u + cx[1]*v + cx[2], cy[0]*u + cy[1]*v + cy[2])
+
+
+def match_fiducials(xo, yo, magnification=None, tol=1.5, use_measured=None, target_file=None):
+    """검출(칩 좌표) 에서 fiducial 을 찾아 ID 를 붙인다. 검출에 fiber 등 다른 점이 섞여 있어도,
+    fiducial 일부가 안 보여도 된다 (measure_fiducials 의 세트별 매칭과 같은 방법).
+
+    matchfiber 의 배율·회전·offset 으로 옮긴 검출이 설계 위치에서 tol [mm] 안이면 "찾았다" 고 보고,
+    찾은 쌍으로 1차(affine) 변환을 최소제곱으로 다시 맞춰 예측 위치 근처의 검출을 다시 붙인다
+    (찾은 수가 늘지 않을 때까지). 한 검출은 한 fiducial 에만.
+    target_file : fiber 가 같이 찍힌 이미지면 object.info 를 준다. fiber 목표까지 넣은 전체 패턴으로
+                  매칭한다 -- fiber 와 fiducial 이 같은 격자에 있어 fiducial 30개만으로는 회전이
+                  정해지지 않는다 (measure_fiducials 와 같다).
+    반환: ids(fiducial ID 목록), idx(검출 번호, 못 찾으면 -1), resid [mm] (못 찾으면 NaN)."""
+    from scipy.spatial import cKDTree
+    from kspec_metrology.analysis.utils import transform
+    from kspec_metrology.analysis.mtlcal import camera2focal_coeff
+    ids, xf, yf = fiducial_positions(use_measured)
+    xo, yo = np.asarray(xo, float), np.asarray(yo, float)
+    nfid = len(ids)
+    idx = np.full(nfid, -1); resid = np.full(nfid, np.nan)
+    if xo.size < 4:
+        return ids, idx, resid
+    if target_file is not None and xo.size > nfid:
+        from kspec_metrology.analysis.mtlcal import load_configuration
+        _, _, xa, ya, fa, _ = load_configuration(target_file, apply_zenith_offset=False, use_measured=use_measured)
+        xa, ya = xa[~np.r_[cfg.dead_mask(), np.zeros(xa.size - len(cfg.fiber_ids()), bool)]], \
+                 ya[~np.r_[cfg.dead_mask(), np.zeros(ya.size - len(cfg.fiber_ids()), bool)]]
+        _, theta, (xoff, yoff) = matchfiber(xa, ya, xo, yo, m_init=magnification)
+    else:
+        if xo.size > 1.5*nfid:
+            get_logger().warning("match_fiducials: %d detections for %d fiducials -- fiber 가 같이 찍혔으면 "
+                                 "target_file 을 주어야 회전이 바로 잡힌다", xo.size, nfid)
+        _, theta, (xoff, yoff) = matchfiber(xf, yf, xo, yo, m_init=magnification)
+    coeff_s = np.copy(camera2focal_coeff); coeff_s[0] = magnification or coeff_s[0]
+    coeff_s[1], coeff_s[2], coeff_s[3] = theta, xoff, yoff; coeff_s[4:] = 0.
+    xs, ys = transform(xo, yo, coeff_s)
+
+    def assign(px, py):
+        """예측 초점면 위치 (px, py) 의 검출을 fiducial 마다 tol 안 가장 가까운 것으로, 중복 없이."""
+        d, j = cKDTree(np.column_stack((px, py))).query(np.column_stack((xf, yf)))
+        found = d < tol
+        for jj in np.unique(j[found]):
+            same = np.where(found & (j == jj))[0]
+            if same.size > 1:
+                found[same] = False; found[same[np.argmin(d[same])]] = True
+        return j, d, found
+
+    j, d, found = assign(xs, ys)
+    for _ in range(8):
+        if found.sum() < 3:
+            break
+        z = xo[j[found]] + 1j*yo[j[found]]; w = xf[found] + 1j*yf[found]
+        A = np.column_stack((z, np.conj(z), np.ones(z.size)))
+        M = np.vstack([np.column_stack([A.real, -A.imag]), np.column_stack([A.imag, A.real])])
+        c, *_ = np.linalg.lstsq(M, np.r_[w.real, w.imag], rcond=None)
+        cc = c[:3] + 1j*c[3:]
+        p = np.column_stack((xo + 1j*yo, xo - 1j*yo, np.ones(xo.size))) @ cc
+        j2, d2, found2 = assign(p.real, p.imag)
+        if found2.sum() < found.sum():
+            break
+        improved = found2.sum() > found.sum()
+        j, d, found = j2, d2, found2
+        if not improved:
+            break
+    idx[found] = j[found]; resid[found] = d[found]
+    return ids, idx, resid
+
+
+def fiducial_brightness(fits_path, threshold=1e3, min_dist=80, finder='sep', finder_opts=None,
+                        nwindow=40, magnification=None, groups=None, sat_level=65000.,
+                        use_measured=None, target_file=None, n=8, crop=60, show=True):
+    """fiducial 밝기 조정용: 이미지 한 장에서 peak 을 찾아 fiducial ID 를 붙이고, 그림 위에
+    ID 와 peak 값을 적고, 표로 돌려준다.
+
+    groups : {'그룹이름': ['A7', 'B1', ...]} 처럼 fiducial 밝기 그룹. 주면 그룹별 색과 요약표.
+    target_file : fiber 도 같이 찍힌 이미지면 object.info (전체 패턴으로 매칭). fiducial 만 찍혔으면 None.
+    표 열: id (fiducial ID, fiducial 이 아니면 '?'), group, peak (창 안 최대 화소 [ADU, 배경 포함]),
+           flux (배경을 뺀 창 안 합 [ADU]), nsat (포화 화소 수), resid_mm (매칭 잔차), u, v [px].
+    peak 이 sat_level 에 닿은 fiducial 은 포화라 위치가 틀어진다; flux 는 포화돼도 대략 비교가 된다.
+    반환: (DataFrame, 그룹 요약 DataFrame 또는 None)."""
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    d = os.path.dirname(os.path.abspath(fits_path)); base = os.path.basename(fits_path)
+    if not base.endswith('0.fits'):
+        raise ValueError("파일 이름이 ...0.fits 로 끝나야 한다 (findpeak 의 이름 규칙)")
+    head = base[:-len('0.fits')]
+    im, xo, yo, _ = findpeak((1, 100000), data_dir=d, head=head, nexposure=1, threshold=threshold,
+                             niter_max=1, min_dist=min_dist, finder=finder, finder_opts=finder_opts,
+                             background='crop', nwindow=nwindow)
+    u, v = chip2pix(xo, yo, im.shape)
+    ny, nx = im.shape
+    peak = np.zeros(u.size); flux = np.zeros(u.size); nsat = np.zeros(u.size, int)
+    for k in range(u.size):
+        i0, j0 = int(round(u[k])), int(round(v[k]))
+        sub = im[max(j0-nwindow, 0):j0+nwindow+1, max(i0-nwindow, 0):i0+nwindow+1]
+        ring = im[max(j0-2*nwindow, 0):j0+2*nwindow+1, max(i0-2*nwindow, 0):i0+2*nwindow+1]
+        bg = np.median(ring)
+        peak[k] = sub.max(); flux[k] = (sub - bg).sum(); nsat[k] = int((sub >= sat_level).sum())
+    ids, idx, resid = match_fiducials(xo, yo, magnification=magnification, use_measured=use_measured,
+                                      target_file=target_file)
+    label = np.array(['?']*u.size, dtype=object); res_col = np.full(u.size, np.nan)
+    for i, j in enumerate(idx):
+        if j >= 0:
+            label[j] = ids[i]; res_col[j] = resid[i]
+    gname = {}
+    if groups:
+        for g, members in groups.items():
+            for m in members:
+                gname[str(m)] = str(g)
+    grp = np.array([gname.get(l, '' if l == '?' else '-') for l in label], dtype=object)
+    T = pd.DataFrame(dict(id=label, group=grp, peak=peak, flux=flux, nsat=nsat, resid_mm=res_col*1e0, u=u, v=v))
+    T = pd.concat([T[T.id != '?'].sort_values(['group', 'id']), T[T.id == '?'].sort_values('peak', ascending=False)]).reset_index(drop=True)
+    nfound = int((idx >= 0).sum()); missing = [i for i, j in zip(ids, idx) if j < 0]
+    print(f"{base}: {u.size} peaks (threshold {threshold:.0f}); fiducials matched {nfound}/{len(ids)}"
+          + (f", not found: {', '.join(missing)}" if missing else '')
+          + f"; saturated (>= {sat_level:.0f}): {int(((T.id != '?') & (T.nsat > 0)).sum())}")
+    summary = None
+    if groups:
+        F = T[T.id != '?']
+        summary = F.groupby('group').agg(n=('id', 'size'), peak_min=('peak', 'min'), peak_median=('peak', 'median'),
+                                         peak_max=('peak', 'max'), flux_median=('flux', 'median'),
+                                         n_sat=('nsat', lambda s: int((s > 0).sum())))
+    if show:
+        colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+        gkeys = list(groups.keys()) if groups else []
+        ax = show_image(im, n, title=f'{base}: fiducial peaks (label = ID: peak ADU; red ring = saturated)')
+        for _, r in T.iterrows():
+            is_fid = r.id != '?'
+            c = 'red' if (is_fid and r.nsat > 0) else (colors[gkeys.index(r.group) % len(colors)] if r.group in gkeys else ('c' if is_fid else 'gray'))
+            ax.add_artist(plt.Circle((r.u, r.v), max(60, min_dist), fc='none', ec=c, lw=1.0 if is_fid else 0.5))
+            if is_fid:
+                ax.text(r.u, r.v + 1.6*max(60, min_dist), f'{r.id}: {r.peak:.0f}', color=c, fontsize=8, ha='center', va='bottom',
+                        bbox=dict(fc='k', ec='none', alpha=0.5, pad=1))
+        if gkeys:
+            for g, c in zip(gkeys, colors):
+                ax.plot([], [], 'o', mfc='none', color=c, label=g)
+            ax.legend(loc='upper right', fontsize=8)
+        F = T[T.id != '?']
+        k = len(F)
+        if k:
+            ncol = 10; nrow = int(np.ceil(k/ncol))
+            fig, axs = plt.subplots(nrow, ncol, figsize=(1.9*ncol, 2.1*nrow), squeeze=False)
+            for a, (_, r) in zip(axs.ravel(), F.iterrows()):
+                uu, vv = int(round(r.u)), int(round(r.v))
+                sub = im[max(vv-crop, 0):vv+crop+1, max(uu-crop, 0):uu+crop+1]
+                a.imshow(sub, cmap='inferno', origin='lower', vmin=np.median(sub), vmax=sat_level)
+                a.set_title(f'{r.id} {r.group if r.group not in ("-", "") else ""}\n{r.peak:.0f}' + (' SAT' if r.nsat else ''),
+                            fontsize=7, color='red' if r.nsat else 'k')
+                a.set_xticks([]); a.set_yticks([])
+            for a in axs.ravel()[k:]:
+                a.axis('off')
+            fig.suptitle(f'{base}: fiducial crops (same colour scale, white = {sat_level:.0f})', fontsize=9)
+            fig.tight_layout()
+    return T, summary
 
 
 # ============================================================================ 한 번 측정

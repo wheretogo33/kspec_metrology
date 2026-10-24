@@ -70,6 +70,9 @@ alpha 는 초점면 +x 에서 반시계가 양, beta 는 항상 0 이상 (2026-1
 **목표 파일 만들기**: `lab.make_target(path, angles=(30, 150))` (모두 같은 각도),
 `offset=(dx, dy)` (회전 중심에서 같은 offset), `xy=(xp, yp)` (개별).
 
+**fiducial 밝기 조정**: 노트북 8절. `lab.fiducial_brightness(fits, groups={...})` 가 fiducial 노출에서
+peak 을 찾아 ID 와 peak 값을 그림에 적고 (포화는 빨간 고리), 그룹별 요약표를 낸다.
+
 ## 반복 측정 (positioner 를 옮긴 뒤)
 
 같은 `OUT_DIR`/`TILE` 로 `lab.measure(..., itrial=None)` 를 다시 부르면 다음 trial

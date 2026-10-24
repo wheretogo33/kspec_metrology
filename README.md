@@ -533,8 +533,24 @@ INFO Recentering shift [px]: median 3.2, 95% 7.1, max 8.5 (limit 20)
 
 `kspec_metrology/notebooks/` 에 세 개가 들어 있다 (`notebooks/README.md`).
 `Metrology_Debug.ipynb` (한 trial 을 단계별로), `Calibration_Run.ipynb` (모든 arm 을 같은
-각도로 둔 배치), `Arm_Scan.ipynb` (회전 중심·arm 길이). 운용 스크립트가 쓰는 함수를 그대로
+각도로 둔 배치), `Arm_Scan.ipynb` (회전 중심·arm 길이), `Fiducial_Brightness.ipynb` (본 측정 전
+fiducial 밝기 조정: peak 검출 → ID·peak 값을 그림에 표시, 그룹별 요약). 운용 스크립트가 쓰는 함수를 그대로
 부르므로 같은 이미지로 같은 결과가 나온다.
+
+## fiducial 밝기 조정
+
+fiducial 은 4개 그룹으로 밝기를 조정한다. 본 측정 전에 fiducial 전용 노출을 한 장 찍어
+
+```python
+from kspec_metrology import lab
+T, S = lab.fiducial_brightness('fid_10ms_0.fits', threshold=1e3, min_dist=80, magnification=8.40,
+                               groups={'G1': ['A7', 'B1', ...], 'G2': [...], 'G3': [...], 'G4': [...]})
+```
+
+로 보면 fiducial 마다 ID 와 peak 값이 영상 위에 적히고 (포화는 빨간 고리), 같은 색 눈금의 crop 과
+표(peak, flux, nsat) 가 나온다. `groups` 를 주면 그룹별 요약표 `S` 가 함께 나온다. fiber 가 같이
+찍힌 이미지면 `target_file=` 로 object.info 를 줘야 fiducial 라벨이 바르게 붙는다 (fiber 와 fiducial 이
+같은 격자라 fiducial 패턴만으로는 회전이 정해지지 않는다). 노트북 `notebooks/Fiducial_Brightness.ipynb`.
 
 ## positioner 회전 중심 · arm 길이 측정 (arm scan)
 

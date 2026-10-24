@@ -43,7 +43,7 @@ def build(out_zip):
             s = os.path.join(root, f)
             d = os.path.join(dst, rel, f)
             os.makedirs(os.path.dirname(d), exist_ok=True)
-            if f.endswith(('.py', '.md', '.txt', '.template')):
+            if f.endswith(('.py', '.md', '.txt', '.template', '.ipynb')):
                 with open(s, encoding='utf-8') as fi:
                     txt = fi.read()
                 with open(d, 'w', encoding='utf-8') as fo:
