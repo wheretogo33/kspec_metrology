@@ -544,7 +544,7 @@ fiducial 은 4개 그룹으로 밝기를 조정한다. 본 측정 전에 fiducia
 ```python
 from kspec_metrology import lab
 T, S = lab.fiducial_brightness('fid_10ms_0.fits', threshold=1e3, min_dist=80, magnification=8.40,
-                               groups={'G1': ['A7', 'B1', ...], 'G2': [...], 'G3': [...], 'G4': [...]})
+                               groups=cfg.FIDUCIAL_GROUPS)     # 밝기 조정 그룹 4개 (fiber_config)
 ```
 
 로 보면 fiducial 마다 ID 와 peak 값이 영상 위에 적히고 (포화는 빨간 고리), 같은 색 눈금의 crop 과

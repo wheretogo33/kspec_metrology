@@ -476,3 +476,11 @@ def arm_lengths(use_measured=None):
                 a2[k] = m['arm2']
 
     return a1, a2
+
+# fiducial 밝기 조정 그룹 (사용자 제공, 2026-10-24). lab.fiducial_brightness(groups=FIDUCIAL_GROUPS).
+FIDUCIAL_GROUPS = {
+    'G1': ['Z2', 'Z3', 'B1', 'B3', 'D6', 'D9', 'A7', 'Z1', 'Z0', 'F1', 'Z5'],
+    'G2': ['H13', 'J11', 'Z11'],
+    'G3': ['K8', 'Z10', 'O7', 'N5', 'Z9', 'Z8', 'L4', 'N1', 'L1', 'Z7', 'I4'],
+    'G4': ['Z6', 'H0', 'Z4', 'E3', 'G8'],
+}
