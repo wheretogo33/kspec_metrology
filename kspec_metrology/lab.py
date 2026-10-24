@@ -619,6 +619,64 @@ def fiducial_brightness(fits_path, threshold=1e3, min_dist=80, finder='sep', fin
     return T, summary
 
 
+def plot_group_brightness(T, groups=None, sat_level=65000., threshold=None, ax=None, title=None):
+    """fiducial_brightness 의 표 T 로 그룹별 peak 막대 그림. 포화 수준·검출 문턱 선 포함.
+    못 찾은 fiducial(그룹에는 있는데 표에 없음) 은 빈 자리로 표시한다."""
+    import matplotlib.pyplot as plt
+    groups = groups if groups is not None else cfg.FIDUCIAL_GROUPS
+    F = T[T.id != '?'].set_index('id')
+    if ax is None:
+        _, ax = plt.subplots(figsize=(14, 4))
+    colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+    pos = 0; ticks = []; labels = []
+    for gi, (g, members) in enumerate(groups.items()):
+        c = colors[gi % len(colors)]
+        vals = [F.peak.get(m, np.nan) for m in members]
+        for m, v in zip(members, vals):
+            if np.isfinite(v):
+                ax.bar(pos, v, color=c, edgecolor='red' if F.nsat.get(m, 0) > 0 else 'none', linewidth=1.5)
+            else:
+                ax.text(pos, 1.2*(threshold or 100), 'x', ha='center', color='gray', fontsize=8)
+            ticks.append(pos); labels.append(m); pos += 1
+        found = int(np.isfinite(vals).sum())
+        ax.text(pos - len(members)/2. - 0.5, sat_level*1.15, f'{g} ({found}/{len(members)})', ha='center', color=c, fontsize=9)
+        pos += 1
+    ax.axhline(sat_level, color='red', ls='--', lw=0.8); ax.text(pos, sat_level, ' saturation', color='red', fontsize=7, va='center')
+    if threshold:
+        ax.axhline(threshold, color='gray', ls=':', lw=0.8); ax.text(pos, threshold, ' threshold', color='gray', fontsize=7, va='center')
+    ax.set_yscale('log'); ax.set_ylim(max(50., (threshold or 100)/5.), sat_level*1.6)
+    ax.set_xticks(ticks); ax.set_xticklabels(labels, rotation=90, fontsize=8); ax.set_ylabel('peak [ADU]')
+    ax.set_title(title or 'fiducial peak by group (red edge = saturated, x = not detected)')
+    return ax
+
+
+def compare_brightness(results, groups=None, sat_level=65000., threshold=None, show=True):
+    """여러 이미지(조정 전후, 노출별) 의 fiducial peak 을 한 표로: 행 = fiducial, 열 = 이미지 이름.
+    results : {'이름': T} (fiducial_brightness 의 표). show 면 fiducial 마다 peak 의 변화를 그룹 색으로 그린다."""
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    groups = groups if groups is not None else cfg.FIDUCIAL_GROUPS
+    cmp = pd.DataFrame({k: T[T.id != '?'].set_index('id').peak for k, T in results.items()})
+    order = [m for members in groups.values() for m in members]
+    cmp = cmp.reindex([m for m in order if m in cmp.index] + [i for i in cmp.index if i not in order])
+    cmp.insert(0, 'group', [next((g for g, m in groups.items() if i in m), '') for i in cmp.index])
+    if show and len(results) > 1:
+        colors = plt.rcParams['axes.prop_cycle'].by_key()['color']
+        _, ax = plt.subplots(figsize=(max(6, 1.6*len(results) + 4), 4.5))
+        names = list(results)
+        for gi, (g, members) in enumerate(groups.items()):
+            for k, m in enumerate(members):
+                if m in cmp.index:
+                    ax.plot(range(len(names)), cmp.loc[m, names].values, '-o', color=colors[gi % len(colors)], ms=3, lw=0.8,
+                            label=g if k == 0 else None)
+        ax.axhline(sat_level, color='red', ls='--', lw=0.8)
+        if threshold:
+            ax.axhline(threshold, color='gray', ls=':', lw=0.8)
+        ax.set_yscale('log'); ax.set_xticks(range(len(names))); ax.set_xticklabels(names, rotation=20, fontsize=8, ha='right')
+        ax.set_ylabel('peak [ADU]'); ax.legend(fontsize=8); ax.set_title('fiducial peak per image (one line per fiducial)')
+    return cmp
+
+
 # ============================================================================ 한 번 측정
 def read_targets(path):
     """목표 파일 -> (xp, yp, kind). object.info 와 같은 json 이고 셋 중 하나를 담는다.
