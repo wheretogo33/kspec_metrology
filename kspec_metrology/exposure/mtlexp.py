@@ -7,7 +7,7 @@ from kspec_metrology.logging.log import get_logger
 from kspec_metrology.naming import image_path
 
 
-def mtlexp(exptime
+def mtlexp(exptime_ms
            , readmode=1
            , usb_traffic=40
            , gain=10
@@ -17,6 +17,8 @@ def mtlexp(exptime
            , head='test'
            , extra_header=None):
     """metrology 카메라로 nexposure장을 찍어 저장한다.
+
+    exptime_ms : 노출시간 [ms]. 카메라 SDK(CONTROL_EXPOSURE, µs) 에는 1000 배 해서 넘긴다.
 
     파일 이름은 {head}{i}.fits 로, findpeak이 같은 data_dir/head로 읽어간다.
     extra_header에 dict을 주면 FITS header에 그대로 더한다 (타일, trial 번호 등).
@@ -34,7 +36,7 @@ def mtlexp(exptime
 
     qc.Initialize(readmode, usb_traffic)
 
-    qc.CamSettings(gain, offset, exptime)
+    qc.CamSettings(gain, offset, float(exptime_ms)*1e3)      # SDK 단위는 µs
 
     paths = []
     try:
@@ -44,7 +46,7 @@ def mtlexp(exptime
             hdr = fits.Header()
             hdr['Gain'] = gain
             hdr['offset'] = offset
-            hdr['texp'] = exptime
+            hdr['texp'] = (float(exptime_ms), 'exposure time [ms]')
             hdr['IEXP'] = (i, 'exposure index within the trial')
             for key, value in (extra_header or {}).items():
                 hdr[key] = value

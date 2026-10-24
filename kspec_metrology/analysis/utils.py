@@ -302,6 +302,31 @@ def transform_polynomial(xin
 def transform(x, y, coeff):
     return _transform_core(np.asarray(x), np.asarray(y), *coeff)
 
+
+def invert_transform(xfocal, yfocal, coeff, n_iter=8):
+    """camera->focal 변환의 역: 초점면 (xfocal, yfocal) 에 대응하는 칩 좌표 [mm].
+    닫힌 역함수가 없으므로 1차 근사(최소제곱)로 출발해 Newton 반복(수치 Jacobian)으로 푼다."""
+    xf, yf = np.asarray(xfocal, float), np.asarray(yfocal, float)
+    g = np.linspace(-15., 15., 7)                              # 칩 전체를 덮는 격자 [mm]
+    gx, gy = np.meshgrid(g, g); gx, gy = gx.ravel(), gy.ravel()
+    fx, fy = transform(gx, gy, coeff)
+    A = np.column_stack((fx, fy, np.ones(fx.size)))
+    cx, *_ = np.linalg.lstsq(A, gx, rcond=None); cy, *_ = np.linalg.lstsq(A, gy, rcond=None)
+    u = cx[0]*xf + cx[1]*yf + cx[2]; v = cy[0]*xf + cy[1]*yf + cy[2]
+    h = 1e-3
+    for _ in range(n_iter):
+        px, py = transform(u, v, coeff)
+        ex, ey = xf - px, yf - py
+        pxu, pyu = transform(u + h, v, coeff); pxv, pyv = transform(u, v + h, coeff)
+        j11, j21 = (pxu - px)/h, (pyu - py)/h                   # d(px,py)/du
+        j12, j22 = (pxv - px)/h, (pyv - py)/h                   # d(px,py)/dv
+        det = j11*j22 - j12*j21
+        du = ( j22*ex - j12*ey)/det; dv = (-j21*ex + j11*ey)/det
+        u, v = u + du, v + dv
+        if np.nanmax(np.hypot(du, dv)) < 1e-7:
+            break
+    return u, v
+
 def dedupe_peaks_kdtree(peak_table: Table, min_dist: float) -> Table:
     """
     peak_table: photutils.find_peaks 결과 (x_peak, y_peak, peak_value 컬럼 포함)

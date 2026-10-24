@@ -18,6 +18,7 @@ def findpeak(npeaks
             , nwindow=40
             , mode="Raw"
             , x=None, y=None
+            , predict=None
             , niter_max=10
             , niter_refine=2
             , niter_recenter=0
@@ -36,6 +37,8 @@ def findpeak(npeaks
 
     """이미지에서 fiber peak을 찾아 중심 위치를 잰다.
 
+    predict : (xchip, ychip) 'Predict' mode 에서 출발할 칩 좌표 [mm] (mtlcal 이 이미 맞춘 변환으로
+        예측해 넘긴다). None 이면 x, y 를 상수 focal2camera_coeff_comm 으로 투영한다 (옛 방식).
     npeaks : 찾을 spot 개수. 정수면 정확히 그 개수가 되도록 문턱값을 맞추고,
         (nmin, nmax) 면 그 범위 안이면 받아들인다. fiducial 전용 노출처럼 fiber 가
         보일 수도 안 보일 수도 있는 이미지에서 쓴다 (예: (nfid, nfid+nfib)).
@@ -204,9 +207,14 @@ def findpeak(npeaks
         log.info("Found %d peaks at threshold %.4g", xf.size, threshold_temp)
 
     elif mode=="Predict":
-        npeaks = int(np.size(x))
-        coeff_temp = np.copy(focal2camera_coeff_comm)
-        xpredict, ypredict = transform(x, y, coeff_temp)
+        if predict is not None:
+            # 이미 맞춘 변환으로 예측한 칩 좌표 (mtlcal 이 넘긴다). 상수 계수보다 믿을 만하다.
+            xpredict, ypredict = np.asarray(predict[0], float), np.asarray(predict[1], float)
+            npeaks = int(xpredict.size)
+        else:
+            npeaks = int(np.size(x))
+            coeff_temp = np.copy(focal2camera_coeff_comm)
+            xpredict, ypredict = transform(x, y, coeff_temp)
 
         # refined 결과를 따로 보관 (원본 보호)
         xref = xpredict.copy()

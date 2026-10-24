@@ -43,8 +43,8 @@ git pull
 ### 시험 촬영 (fiducial 밝기 조정 등)
 
 ```bash
-python kspec_metrology/notebooks/take_exposure.py --exptime 0.010 --out /data/fid_10ms.fits
-python kspec_metrology/notebooks/take_exposure.py --exptime 0.002 0.010 --out '/data/{date}_fid_{ms}ms.fits'
+python kspec_metrology/notebooks/take_exposure.py --exptime 10 --out /data/fid_10ms.fits          # 노출 [ms]
+python kspec_metrology/notebooks/take_exposure.py --exptime 2 10 --out '/data/{date}_fid_{ms}ms.fits'
 ```
 
 MetrologyRun 과 같은 카메라 설정으로 찍어 원하는 이름으로 저장한다 (`{ms}`, `{date}`, `{time}`,
@@ -81,7 +81,7 @@ from kspec_metrology.mtlrun import MetrologyRun
 
 run = MetrologyRun(target_file='/path/to/target.info',
                    data_dir='./MTL/data/', json_dir='./MTL/json/',
-                   exptime=0.1, tolerance=10., max_trial=5)
+                   exptime=100., tolerance=10., max_trial=5)     # exptime [ms]
 
 move(run.start())                 # Trial 0 json = 관측 전 목표 각도
 
@@ -94,6 +94,8 @@ summary.converged                      # 허용 오차 안에 들어왔는가
 summary.ntrial                         # 실제로 돈 trial 수
 summary.err_max, summary.err_median    # 마지막 fiber 위치 오차 [um]
 ```
+
+노출시간(`exptime`, `fid_exptime`)의 단위는 **ms** 다 (카메라 SDK 에는 µs 로 바꿔 넘긴다).
 
 ## 출력 형식
 
@@ -396,10 +398,10 @@ fiber 와 fiducial 의 밝기 차이가 커서 한 노출로는 한쪽이 포화
 
 ```python
 # case 1: fiber t2, fiducial t1
-run = MetrologyRun(..., exptime=2.0e-3, fid_exptime=0.5e-3)
+run = MetrologyRun(..., exptime=2.0, fid_exptime=0.5)        # [ms]
 
 # case 2: fiber t2, fiducial 을 두 노출로 (밝기 차이가 심한 fiducial 들)
-run = MetrologyRun(..., exptime=2.0e-3, fid_exptime=[0.5e-3, 2.0e-3])
+run = MetrologyRun(..., exptime=2.0, fid_exptime=[0.5, 2.0])
 ```
 
 분석 순서는 `mtlcal(..., fid_head=...)` 에 있다.
@@ -435,7 +437,7 @@ run = MetrologyRun(..., exptime=2.0e-3, fid_exptime=[0.5e-3, 2.0e-3])
 run = MetrologyRun(target_file=..., data_dir=..., json_dir=...,
                    magnification=-5.2, model='radial',
                    nwindow=30, threshold=1e3,
-                   exptime=2e-3, fid_exptime=0.5e-3)
+                   exptime=2., fid_exptime=0.5)
 ```
 
 `nwindow` (무게중심 창 반폭) 와 `threshold` 는 그 광학계의 PSF 크기와 밝기에
@@ -562,6 +564,32 @@ INFO Recentering shift [px]: median 3.2, 95% 7.1, max 8.5 (limit 20)
 각도로 둔 배치), `Arm_Scan.ipynb` (회전 중심·arm 길이), `Fiducial_Brightness.ipynb` (본 측정 전
 fiducial 밝기 조정: peak 검출 → ID·peak 값을 그림에 표시, 그룹별 요약). 운용 스크립트가 쓰는 함수를 그대로
 부르므로 같은 이미지로 같은 결과가 나온다.
+
+## Predict mode (오차가 작아진 뒤의 빠른 측정)
+
+`mode='Raw'`(기본)는 threshold 를 조절해 가며 peak 을 검출하고 패턴에 매칭한다. 어떤 배치에서도
+돌지만 검출·매칭이 들어간다. `mode='Predict'` 는 이미 맞춘 변환으로 각 목표의 칩 좌표를 예측해
+그 창(`nwindow`) 안의 가장 밝은 픽셀에서 무게중심을 재고 매칭을 하지 않는다.
+
+- 노출을 나눠 찍으면(`fid_exptime`) fiducial 은 Raw 로 찾아 변환을 맞추고, fiber 만 그 변환으로 Predict 한다.
+- 한 벌 이미지면 직전 trial 이 저장한 변환(`{tile}_MetrologyTrial_{i}_coeff.npy`)을 쓴다. 없으면(첫 trial)
+  그 trial 은 자동으로 Raw 로 돌고 경고를 남긴다.
+- 끊어진 fiber(`FIBER_EXCLUDE`), 고정된 positioner(`FIBER_FIXED`), sky fiber(`SKY_FIBERS`) 처리는 Raw 와
+  같다 (목록의 자리는 보지 않는다). 창 안에 threshold 이상의 화소가 없는 fiber 는 그 trial 에 못 잰
+  것으로 두고(NaN, 회전 0) ID 를 경고한다.
+- 한계: 창 반폭은 초점면에서 `nwindow × 3.76 µm × 배율` ≈ 1.3 mm (nwindow 40, 배율 8.4) 다. 목표에서
+  이보다 멀리 있는 fiber 는 창에 spot 이 없거나 꼬리만 들어와 틀린 값이 나올 수 있다. 예측 위치에서
+  창 반폭의 80 % 보다 멀리 잰 fiber 는 ID 와 함께 경고하므로 그때는 Raw 로 확인한다.
+  **첫 trial 과 오차가 ~1 mm 를 넘는 배치는 Raw 로, 오차가 그 안으로 들어온 뒤(보통 trial 2 부터) Predict 로.**
+
+```python
+run = MetrologyRun(..., mode='Raw')        # trial 1
+...
+run.mode = 'Predict'                        # 오차가 작아진 뒤
+```
+
+2026-10-23 실험실 영상(노출 분리)으로 같은 이미지를 Raw 와 Predict 로 재면 오차 1.3 mm 안의 fiber 는
+위치가 0.000 µm 차이로 같고, 2.0 mm·2.1 mm·3.6 mm 벗어난 fiber 셋은 Predict 가 못 재거나(NaN) 경고를 낸다.
 
 ## fiducial 밝기 조정
 

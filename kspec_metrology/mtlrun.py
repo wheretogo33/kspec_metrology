@@ -17,7 +17,7 @@ fiber를 옮기는 일은 이 패키지 밖의 일이므로, 여기서는 trial 
 
     run = MetrologyRun(target_file='/path/to/target.info',
                        data_dir='./MTL/data/', json_dir='./MTL/json/',
-                       exptime=0.1, tolerance=10., max_trial=5)
+                       exptime=100., tolerance=10., max_trial=5)   # exptime [ms]
 
     move(run.start())                 # Trial 0 json = 관측 전 목표 각도
 
@@ -86,12 +86,11 @@ class MetrologyRun:
         metric      : 수렴을 판정할 통계. 'max' (기본) 또는 'median'
         max_trial   : 최대 반복 횟수. None이면 제한 없음
         nexposure   : trial 한 번에 찍을 이미지 장수
-        mode        : findpeak의 peak 검출 방식. 'Raw' 또는 'Predict'.
-                      'Predict'는 목표 위치를 focal2camera_coeff_comm으로
-                      투영해 출발하므로 그 계수가 실제 광학계와 맞아야 한다.
-                      맞지 않으면 엉뚱한 픽셀에서 무게중심을 재면서도 에러
-                      없이 그럴듯한 값을 내놓는다. 기본값은 그 가정이 필요
-                      없는 'Raw'로 둔다 (mtlcal과 동일)
+        mode        : findpeak의 peak 검출 방식. 'Raw'(기본) 또는 'Predict'.
+                      'Predict'는 이미 맞춘 변환(노출을 나눴으면 이번 trial 의
+                      fiducial fit, 한 벌이면 직전 trial 의 _coeff.npy)으로
+                      예측한 자리의 창 안에서만 잰다 (매칭 없음). 첫 trial 이나
+                      오차가 창 반폭(~1.3 mm)보다 크면 Raw 를 쓴다 (mtlcal 참고)
         threshold   : 'Raw' mode의 검출 문턱값
         nwindow     : center of mass를 잴 crop 반폭 [pixel]. fiber 사이 최소
                       이격 거리에 맞춰야 한다 (mtlcal 참고)
@@ -106,8 +105,8 @@ class MetrologyRun:
         finder_opts : 방법별 추가 인자 dict
         background  : 배경 제거. 'crop'(기본, 창마다 뺌) | 'scalar' | 'background2d' | 'sep' | None
         background_opts : 배경 추정 인자 dict
-        exptime, gain, offset, readmode, usb_traffic : 카메라 설정
-        fid_exptime : fiducial 전용 노출시간. None(기본)이면 fiber 와 같은 이미지에서
+        exptime, gain, offset, readmode, usb_traffic : 카메라 설정. exptime 은 [ms]
+        fid_exptime : fiducial 전용 노출시간 [ms]. None(기본)이면 fiber 와 같은 이미지에서
                       fiducial 도 찾는다. 숫자 하나면 그 노출로 fiducial 세트를 한 번
                       더 찍고 (case 1: fiber t2, fiducial t1), 리스트면 세트를 여러 번
                       찍어 fiducial 마다 포화되지 않은 가장 밝은 것을 쓴다
@@ -147,7 +146,7 @@ class MetrologyRun:
                  , finder_opts=None
                  , background='crop'
                  , background_opts=None
-                 , exptime=0.1
+                 , exptime=100.
                  , gain=10
                  , offset=30
                  , readmode=1
@@ -277,18 +276,18 @@ class MetrologyRun:
         반환: (경로들, 실제로 쓴 노출시간)"""
         from astropy.io import fits
         for attempt in range(self.max_retry + 1):
-            cam = dict(self.camera, exptime=exptime)
-            paths = mtlexp(data_dir=self.data_dir, head=head, nexposure=nexposure,
+            cam = dict(self.camera); cam.pop('exptime', None)
+            paths = mtlexp(exptime, data_dir=self.data_dir, head=head, nexposure=nexposure,
                            extra_header=header, **cam)
             if not self.auto_exposure:
                 return paths, exptime
             nsat = max(int((fits.getdata(p) >= self.sat_level).sum()) for p in paths)
             if nsat <= self.sat_max_pixels or attempt == self.max_retry:
                 if nsat > self.sat_max_pixels:
-                    self.log.warning("%s: still %d saturated pixel(s) at %.4g s after %d retries",
+                    self.log.warning("%s: still %d saturated pixel(s) at %.4g ms after %d retries",
                                      head, nsat, exptime, attempt)
                 return paths, exptime
-            self.log.info("%s: %d saturated pixel(s) at %.4g s -> re-exposing at %.4g s",
+            self.log.info("%s: %d saturated pixel(s) at %.4g ms -> re-exposing at %.4g ms",
                           head, nsat, exptime, exptime*self.exposure_factor)
             exptime *= self.exposure_factor
         return paths, exptime

@@ -10,7 +10,7 @@ from kspec_metrology.analysis.findpeak import findpeak
 from kspec_metrology.analysis.matchfiber import matchfiber
 from kspec_metrology.analysis.fitdistortion import fitdistortion
 from kspec_metrology.analysis.utils import (find_angle_double_method2_select_elbow, transform,
-                                            camera2focal_coeff)
+                                            camera2focal_coeff, invert_transform)
 from kspec_metrology.analysis.zenith_offset import zenith_offset
 from kspec_metrology.analysis.target_info import read_target, zenith_angle
 from kspec_metrology.analysis import fiber_config as cfg
@@ -505,24 +505,59 @@ def measure_fiducials(fid_heads, x, y, fid_flag, data_dir, nexposure,
     return xobs, yobs, choice, best['theta'], best['off']
 
 
+def _all_hole_ids(nfib, fid_flag):
+    """load_configuration 순서의 홀 ID (fiber 표 순서 + fiducial)."""
+    tab = ascii.read(cfg.FIBER_TABLE_PATH)
+    ids = [str(v).strip() for v in tab[tab.colnames[0]]]; flags = [int(v) for v in tab[tab.colnames[3]]]
+    return list(cfg.fiber_ids()) + [i for i, f in zip(ids, flags) if f == 1 and i not in cfg.FIDUCIAL_EXCLUDE]
+
+
 def measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, max_dist=None, n_extra=0,
-                   exclude=None, **pk):
+                   exclude=None, mode='Raw', **pk):
     """fiber 노출에서 peak 을 찾아 (fiducial 로 맞춘) 변환으로 focal 좌표로 옮기고
     목표 위치에 가장 가까운 것을 그 fiber 로 본다. x, y 는 fiber + fiducial 전체
     목표 (fiducial 은 그 자리의 검출을 fiber 로 잘못 잡지 않게 하려고 넣는다).
 
     exclude : (xchip, ychip) 이미 아는 fiducial 의 칩 좌표. 주면 그 자리를 지우고 찾는다.
+    mode : 'Raw' (검출 뒤 매칭) 또는 'Predict' (coeff 로 예측한 자리의 창 안에서만 잰다, 매칭 없음).
 
     반환: xfocal, yfocal (x, y 순서), dist (매칭 거리 [mm]), (xobs, yobs) (같은 순서의 칩 좌표)
     """
     log = get_logger()
     nfid = x.size - nfib
+    if max_dist is None:
+        max_dist = 3.0                                   # fiber 최소 이격(~3 mm) 정도
+    if mode == 'Predict':
+        # 이번 trial 의 fiducial 로 맞춘 변환으로 각 fiber 목표의 칩 좌표를 예측해 그 창 안에서만 잰다.
+        # 창에 아무것도 없으면 (끊어졌는데 목록에 없는 fiber 등) 그 fiber 는 이번 trial 에 못 잰 것으로 둔다.
+        xc, yc = invert_transform(x[:nfib], y[:nfib], coeff)
+        _, xobs, yobs, peak = findpeak(nfib, data_dir=data_dir, head=head, nexposure=nexposure,
+                                       mode='Predict', predict=(xc, yc), exclude=exclude, **pk)
+        xf, yf = transform(xobs, yobs, coeff)
+        dist = np.hypot(xf - x[:nfib], yf - y[:nfib])
+        lost = peak < pk.get('threshold', 0.)
+        ids = list(cfg.fiber_ids()); alive = [i for i, d in zip(ids, cfg.dead_mask()) if not d]
+        if lost.any():
+            log.warning("Predict: no spot above threshold at %d predicted position(s): %s -- "
+                        "left unmeasured this trial (NaN); if the fiber is dark add it to FIBER_EXCLUDE",
+                        int(lost.sum()), ", ".join(alive[i] for i in np.where(lost)[0]))
+            xf[lost] = np.nan; yf[lost] = np.nan; dist[lost] = np.nan
+        # 창 반폭(초점면 mm)의 80 % 보다 멀리 잰 fiber 는 창이 spot 전체를 담지 못했을 수 있다 (꼬리만 잡힘)
+        lim = 0.8*pk.get('nwindow', 40)*3.76e-3*abs(coeff[0])
+        far = np.where(dist > lim)[0]
+        if far.size:
+            log.warning("Predict: %d fiber(s) measured farther than %.2f mm (80%% of the window) from the "
+                        "predicted position: %s -- the window may not contain the whole spot; verify with "
+                        "mode='Raw'", far.size, lim, ", ".join(f"{alive[i]} ({dist[i]:.2f} mm)" for i in far))
+        log.info("Fiber image (%s, Predict): %d windows; fiber-target distance median %.1f um, max %.1f um",
+                 head, nfib, np.nanmedian(dist)*1e3, np.nanmax(dist)*1e3)
+        xfocal = np.full(x.size, np.nan); yfocal = np.full(y.size, np.nan)
+        xfocal[:nfib], yfocal[:nfib] = xf, yf
+        return xfocal, yfocal, np.r_[dist, np.full(nfid, np.nan)], (xobs, yobs)
     nmax = nfib + n_extra if exclude is not None else nfib + nfid + n_extra
     _, xobs, yobs, _ = findpeak((nfib, nmax), data_dir=data_dir, head=head,
                                 nexposure=nexposure, exclude=exclude, **pk)
     xf, yf = transform(xobs, yobs, coeff)
-    if max_dist is None:
-        max_dist = 3.0                                   # fiber 최소 이격(~3 mm) 정도
     keep = np.ones(xf.size, bool)
     fixed = cfg.fixed_spots()
     if fixed:
@@ -620,8 +655,14 @@ def mtlcal(data_dir='./MTL/data/'
     cross_exclude (기본 True) 는 노출을 나눠 찍었을 때 fiber 노출의 fiducial 자리와
     fiducial 노출의 fiber 자리를 서로 지우고 찾는 것이다 (양쪽 다 켜 놓고 찍은 경우).
 
-    mode는 findpeak에 그대로 넘어간다. "Raw"는 threshold를 조절해 가며 peak을
-    찾고, "Predict"는 목표 위치에서 출발해 가장 밝은 픽셀로 정렬한다.
+    mode: "Raw"(기본) 는 threshold 를 조절해 가며 peak 을 찾고 패턴에 매칭한다. "Predict" 는
+    이미 맞춘 변환으로 각 목표의 칩 좌표를 예측해 그 창(nwindow) 안의 가장 밝은 픽셀에서 잰다
+    (매칭 없음). 노출을 나눴으면 fiducial 은 Raw 로 찾아 변환을 맞추고 fiber 만 Predict 로 잰다;
+    한 벌 이미지면 직전 trial 이 저장한 변환(_coeff.npy)을 쓰고, 없으면 그 trial 은 Raw 로 돈다.
+    끊어진/고정된/sky fiber 처리는 Raw 와 같다 (목록의 fiber 자리는 보지 않는다). 창 안에 threshold
+    이상의 화소가 없는 fiber 는 그 trial 에 못 잰 것(NaN, 회전 0)으로 두고 경고한다. 목표에서
+    창 반폭(nwindow × 3.76 µm × 배율 ≈ 1.3 mm) 넘게 벗어난 fiber 는 Predict 로 잴 수 없으므로
+    위치 오차가 그 안으로 들어온 뒤(보통 trial 2 부터) 쓴다.
 
     nwindow는 findpeak이 center of mass를 잴 때 쓰는 crop 반폭 [pixel]이다.
     이 창 안에 이웃 spot이 들어오면 무게중심이 끌려가 위치를 잘못 잰다. 창의
@@ -677,26 +718,62 @@ def mtlcal(data_dir='./MTL/data/'
     xa, ya, fa = x[~dead], y[~dead], fid_flag[~dead]
     nfib_a = int((~dead[:nfib]).sum())
 
+    prev_coeff = None
+    if mode == 'Predict' and fid_head is None:
+        # 한 벌 이미지의 Predict 는 직전 trial 에서 맞춘 변환이 있어야 한다 (없으면 Raw 로)
+        cp = naming.coeff_path(json_dir, target_name, itrial-1) if (json_dir is not None and target_name is not None) else None
+        if cp is not None and os.path.exists(cp):
+            prev_coeff = np.load(cp)
+        else:
+            log.warning("Predict mode: no transform from the previous trial (%s) -- using Raw for this trial", cp)
+            mode = 'Raw'
+
     if fid_head is None:
         #---이미지 한 벌: fiber 와 fiducial 을 같이 찾는다-------------------------
-        npeaks = xa.size if (mode != "Raw" or n_extra == 0) else (xa.size, xa.size + n_extra)
-        _, xobs, yobs, _, nsat = findpeak(npeaks, data_dir=data_dir, head=head,
-                                          nexposure=nexposure, mode=mode, x=xa, y=ya,
-                                          sat_level=sat_level, ReturnNsat=True, **pk)
+        if mode == 'Predict':
+            xc, yc = invert_transform(xa, ya, prev_coeff)
+            _, xobs, yobs, peak, nsat = findpeak(xa.size, data_dir=data_dir, head=head, nexposure=nexposure,
+                                                 mode='Predict', predict=(xc, yc), sat_level=sat_level,
+                                                 ReturnNsat=True, **pk)
+            found = peak >= threshold
+            if not found.all():
+                ids_a = [i for i, d in zip(_all_hole_ids(nfib, fid_flag), dead) if not d]
+                log.warning("Predict: no spot above threshold at %d predicted position(s): %s -- left unmeasured "
+                            "this trial", int((~found).sum()), ", ".join(ids_a[i] for i in np.where(~found)[0]))
+            px, py = transform(xobs, yobs, prev_coeff)
+            dpred = np.hypot(px - xa, py - ya); lim = 0.8*nwindow*3.76e-3*abs(prev_coeff[0])
+            far = np.where(found & (dpred > lim))[0]
+            if far.size:
+                ids_a = [i for i, d in zip(_all_hole_ids(nfib, fid_flag), dead) if not d]
+                log.warning("Predict: %d spot(s) measured farther than %.2f mm (80%% of the window) from the "
+                            "predicted position: %s -- the window may not contain the whole spot; verify with "
+                            "mode='Raw'", far.size, lim, ", ".join(f"{ids_a[i]} ({dpred[i]:.2f} mm)" for i in far))
+            imatch = np.arange(int(found.sum()))
+            theta_guess, xoff_guess, yoff_guess = prev_coeff[1], prev_coeff[2], prev_coeff[3]
+            xf_f, yf_f, _, _, coeff = fitdistortion(xa[found], ya[found], fa[found], xobs[found], yobs[found],
+                                                    imatch, theta_guess, xoff_guess, yoff_guess,
+                                                    model=model, m_init=magnification)
+            xf_a = np.full(xa.size, np.nan); yf_a = np.full(ya.size, np.nan)
+            xf_a[found], yf_a[found] = xf_f, yf_f
+            nsat_fid = int((nsat[fa & found] > 0).sum())
+        else:
+            npeaks = xa.size if n_extra == 0 else (xa.size, xa.size + n_extra)
+            _, xobs, yobs, _, nsat = findpeak(npeaks, data_dir=data_dir, head=head,
+                                              nexposure=nexposure, mode='Raw', x=xa, y=ya,
+                                              sat_level=sat_level, ReturnNsat=True, **pk)
 
-        imatch, theta_guess, (xoff_guess, yoff_guess) = matchfiber(
-            xa, ya, xobs, yobs, m_init=magnification)
+            imatch, theta_guess, (xoff_guess, yoff_guess) = matchfiber(
+                xa, ya, xobs, yobs, m_init=magnification)
 
-        nsat_fid = int((nsat[imatch][fa] > 0).sum())
+            nsat_fid = int((nsat[imatch][fa] > 0).sum())
+            xf_a, yf_a, _, _, coeff = fitdistortion(xa, ya, fa
+                                                    , xobs, yobs
+                                                    , imatch, theta_guess
+                                                    , xoff_guess, yoff_guess
+                                                    , model=model, m_init=magnification)
         if nsat_fid:
             log.warning("%d fiducial(s) saturated; consider a separate fiducial "
                         "exposure (fid_head / fid_exptime)", nsat_fid)
-
-        xf_a, yf_a, _, _, _ = fitdistortion(xa, ya, fa
-                                            , xobs, yobs
-                                            , imatch, theta_guess
-                                            , xoff_guess, yoff_guess
-                                            , model=model, m_init=magnification)
     else:
         #---노출을 나눠 찍은 경우: fiducial 노출로 변환을 맞추고 fiber 노출에 적용----
         fid_heads = [fid_head] if isinstance(fid_head, str) else list(fid_head)
@@ -719,7 +796,7 @@ def mtlcal(data_dir='./MTL/data/'
 
         xf_a, yf_a, _, (xo_fib, yo_fib) = measure_fibers(
             head, xa, ya, nfib_a, coeff, data_dir, nexposure, n_extra=n_extra,
-            exclude=(xo_fid, yo_fid) if cross_exclude else None, **pk)
+            exclude=(xo_fid, yo_fid) if cross_exclude else None, mode=mode, **pk)
         if cross_exclude:
             # fiber 자리를 지우고 fiducial 을 다시 찾아 변환을 다시 맞춘다
             xo_fid, yo_fid, _, theta_guess, (xoff_guess, yoff_guess) = measure_fiducials(
@@ -732,7 +809,7 @@ def mtlcal(data_dir='./MTL/data/'
                 model=model, m_init=magnification)
             xf_a, yf_a, _, _ = measure_fibers(
                 head, xa, ya, nfib_a, coeff, data_dir, nexposure, n_extra=n_extra,
-                exclude=(xo_fid, yo_fid), **pk)
+                exclude=(xo_fid, yo_fid), mode=mode, **pk)
         xf_a[fa], yf_a[fa] = xf_fid, yf_fid                      # fiducial 은 전용 노출 값
 
     xfocal = np.full(x.size, np.nan); yfocal = np.full(y.size, np.nan)
@@ -746,6 +823,12 @@ def mtlcal(data_dir='./MTL/data/'
 
     dtheta, dphi = _wrap(theta_true - theta_obs, phi_true - phi_obs)
     dtheta[dead[:nfib]] = 0.; dphi[dead[:nfib]] = 0.             # 끊어진 fiber 는 안 움직인다
+    lost = ~dead[:nfib] & ~np.isfinite(dtheta)                   # 이번 trial 에 못 잰 fiber (Predict 창이 빔)
+    if lost.any():
+        ids = list(cfg.fiber_ids())
+        log.warning("%d fiber(s) not measured this trial (rotation set to 0): %s",
+                    int(lost.sum()), ", ".join(ids[i] for i in np.where(lost)[0]))
+        dtheta[lost] = 0.; dphi[lost] = 0.
 
     angle_rot = _flatten_angles(dtheta, dphi)
 
@@ -766,6 +849,7 @@ def mtlcal(data_dir='./MTL/data/'
     angle_cum = prev + angle_rot
 
     if json_dir is not None and target_name is not None:
+        np.save(naming.coeff_path(json_dir, target_name, itrial), coeff)   # 다음 trial 의 Predict 가 읽는다
         log.info("Saved angles to %s",
                  save_angles(json_dir, target_name, itrial, angle_cum))
         log.info("Saved fiber offsets to %s",

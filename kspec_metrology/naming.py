@@ -59,3 +59,8 @@ def offset_path(json_dir, tile, itrial):
 def json_path(json_dir, tile, itrial):
     """한 trial의 positioner 각도 json 경로."""
     return os.path.join(json_dir, STEM.format(tile=tile, itrial=itrial) + '.json')
+
+
+def coeff_path(json_dir, tile, itrial):
+    """한 trial 에서 맞춘 camera->focal 변환 계수 (npy) 경로. 다음 trial 의 'Predict' mode 가 읽는다."""
+    return os.path.join(json_dir, STEM.format(tile=tile, itrial=itrial) + '_coeff.npy')
