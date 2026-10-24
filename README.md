@@ -15,15 +15,41 @@ metrology 한 바퀴(trial)는
 
 Python **3.11 이상**이 필요하다.
 
-```bash
-poetry install
-```
-
-poetry를 쓰지 않는다면:
+### 다른 컴퓨터에 처음 설치 (git clone)
 
 ```bash
-pip install .
+git clone https://github.com/wheretogo33/kspec_metrology.git     # 또는 git@github.com:wheretogo33/kspec_metrology.git
+cd kspec_metrology
+pip install -e .                      # editable: 저장소의 코드를 그대로 쓴다 (git pull 이 바로 반영)
+python -m kspec_metrology.check_env   # numpy, scipy, astropy, photutils, sep 확인
 ```
+
+`pip install .` (editable 아님) 은 site-packages 에 복사본을 두므로 `git pull` 뒤에 다시
+설치해야 하고, `fiber_config.py` 를 고쳐도 반영되지 않는다. editable 을 권한다.
+poetry 를 쓰면 `poetry install`.
+
+### 업데이트 (GitHub 에 올라온 변경만 받기)
+
+```bash
+cd kspec_metrology
+git pull
+```
+
+추적되는 파일(예: `analysis/fiber_config.py` 의 `FIBER_EXCLUDE` 목록)을 그 컴퓨터에서 직접
+고쳤으면 pull 이 충돌할 수 있다. 그런 설정은 파일 대신 환경변수(`KSPEC_FIBER_EXCLUDE`,
+`KSPEC_FIBER_FIXED`, `KSPEC_SKY_FIBERS`, `KSPEC_ANGLE_SIGN` …)로 주거나, 고친 파일을
+`git stash` → `git pull` → `git stash pop` 으로 넘긴다. 결과·이미지는 저장소 밖 폴더에 둔다.
+
+### 시험 촬영 (fiducial 밝기 조정 등)
+
+```bash
+python kspec_metrology/notebooks/take_exposure.py --exptime 0.010 --out /data/fid_10ms.fits
+python kspec_metrology/notebooks/take_exposure.py --exptime 0.002 0.010 --out '/data/{date}_fid_{ms}ms.fits'
+```
+
+MetrologyRun 과 같은 카메라 설정으로 찍어 원하는 이름으로 저장한다 (`{ms}`, `{date}`, `{time}`,
+`{i}` 사용 가능; 분석 함수가 `...0.fits` 꼴을 기대하므로 `_0` 이 자동으로 붙는다). 찍은 뒤
+최대 화소값과 포화 화소 수를 바로 보여 준다. `--dry-run` 은 이름만 확인.
 
 ### 의존성
 
