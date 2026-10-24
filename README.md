@@ -45,7 +45,11 @@ git pull
 ```bash
 python kspec_metrology/notebooks/take_exposure.py --exptime 10 --out /data/fid_10ms.fits          # 노출 [ms]
 python kspec_metrology/notebooks/take_exposure.py --exptime 2 10 --out '/data/{date}_fid_{ms}ms.fits'
+python kspec_metrology/notebooks/take_exposure.py --fiber 400 --fid 2 10 --out /data/calib_t1   # 세트: fiber 1장 + fiducial 2장
 ```
+
+세트 촬영은 `calib_t1_fib_400ms_0.fits`, `calib_t1_fid1_2ms_0.fits`, `calib_t1_fid2_10ms_0.fits` 로 저장하고
+노트북에 붙여 넣을 `FIBER_IMAGE` / `FID_IMAGES` 줄을 끝에 찍어 준다.
 
 MetrologyRun 과 같은 카메라 설정으로 찍어 원하는 이름으로 저장한다 (`{ms}`, `{date}`, `{time}`,
 `{i}` 사용 가능; 분석 함수가 `...0.fits` 꼴을 기대하므로 `_0` 이 자동으로 붙는다). 찍은 뒤
