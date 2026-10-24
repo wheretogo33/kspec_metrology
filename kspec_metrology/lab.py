@@ -330,8 +330,9 @@ def _inspect(data_dir, head, fid_heads, target_file, nexposure=1, fid_nexposure=
                 head, x, y, nfib, coeff, data_dir, nexposure, n_extra=n_extra,
                 exclude=(xo_f, yo_f), **pk)
         xfocal[fid_flag], yfocal[fid_flag] = xf, yf
-        show_detections(im, xobs, yobs, labels=ids, flag=fid_flag, n=n,
-                        title=f'fiber image ({head}): matched peaks (orange = fiducial positions, not used)')
+        # fiber 는 fiber 노출의 매칭 결과, fiducial 은 fiducial 노출에서 잰 자리(주황; 이 이미지에서는 쓰지 않음)
+        show_detections(im, np.r_[xobs[:nfib], xo_f], np.r_[yobs[:nfib], yo_f], labels=ids, flag=fid_flag, n=n,
+                        title=f'fiber image ({head}): cyan = matched fibers, orange = fiducial positions from the fiducial exposure')
     else:
         npk = x.size if (mode != 'Raw' or n_extra == 0) else (x.size, x.size + n_extra)
         _, xobs, yobs, peak, nsat = findpeak(npk, data_dir=data_dir, head=head, nexposure=nexposure,

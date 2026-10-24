@@ -583,7 +583,10 @@ def measure_fibers(head, x, y, nfib, coeff, data_dir, nexposure, max_dist=None, 
     # 목표 <-> 검출 할당: 한 검출은 한 목표에만 (거리 합 최소). 너무 먼 짝은 큰 비용으로 막는다.
     D = np.hypot(x[:, None] - xf[None, :], y[:, None] - yf[None, :])
     C = np.where(D > 3*max_dist, 1e6 + D, D)
-    rows, cols = linear_sum_assignment(C)
+    # fiducial 자리를 지운 이미지(exclude)라면 fiducial 목표는 할당에서 뺀다 (fiber 검출을 가져가지 않게);
+    # 그 행은 아래에서 가장 가까운 검출로 채우지만 결과에는 쓰이지 않는다 (mtlcal 이 fiducial 노출 값으로 덮는다)
+    nrow = nfib if exclude is not None else x.size
+    rows, cols = linear_sum_assignment(C[:nrow])
     j = np.zeros(x.size, dtype=int); dist = np.full(x.size, np.inf)
     j[rows] = cols; dist[rows] = D[rows, cols]
     unassigned = np.setdiff1d(np.arange(x.size), rows)
