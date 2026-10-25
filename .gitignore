@@ -8,6 +8,8 @@
 !LICENSE
 !pyproject.toml
 !poetry.lock
+!tools/
+!tools/**
 !kspec_metrology/
 !kspec_metrology/**
 
