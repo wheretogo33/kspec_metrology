@@ -34,3 +34,7 @@ dist/
 kspec_metrology/tmp/*.fits
 kspec_metrology/tmp/*.npz
 kspec_metrology/tmp/*.json
+
+# 노트북을 notebooks/ 안에서 실행했을 때 생기는 결과 폴더
+kspec_metrology/notebooks/metrology_out/
+kspec_metrology/notebooks/*_out/
