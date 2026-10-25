@@ -620,6 +620,212 @@ def fiducial_brightness(fits_path, threshold=1e3, min_dist=80, finder='sep', fin
     return T, summary
 
 
+def _match_pattern(xt, yt, xo, yo, magnification=None, tol=1.5):
+    """설계 패턴 (xt, yt) 와 검출 (xo, yo; 칩 좌표) 을 짝짓는다 (match_fiducials 의 본체).
+    tol 은 스칼라 또는 목표별 배열 [mm]. 반환: idx (목표별 검출 번호, 못 찾으면 -1), resid [mm]."""
+    from scipy.spatial import cKDTree
+    from kspec_metrology.analysis.utils import transform
+    from kspec_metrology.analysis.mtlcal import camera2focal_coeff
+    xt, yt = np.asarray(xt, float), np.asarray(yt, float)
+    xo, yo = np.asarray(xo, float), np.asarray(yo, float)
+    tol = np.broadcast_to(np.asarray(tol, float), xt.shape)
+    idx = np.full(xt.size, -1); resid = np.full(xt.size, np.nan)
+    if xo.size < 4 or xt.size < 4:
+        return idx, resid
+    _, theta, (xoff, yoff) = matchfiber(xt, yt, xo, yo, m_init=magnification)
+    coeff_s = np.copy(camera2focal_coeff); coeff_s[0] = magnification or coeff_s[0]
+    coeff_s[1], coeff_s[2], coeff_s[3] = theta, xoff, yoff; coeff_s[4:] = 0.
+    xs, ys = transform(xo, yo, coeff_s)
+
+    def assign(px, py):
+        d, j = cKDTree(np.column_stack((px, py))).query(np.column_stack((xt, yt)))
+        found = d < tol
+        for jj in np.unique(j[found]):
+            same = np.where(found & (j == jj))[0]
+            if same.size > 1:
+                found[same] = False; found[same[np.argmin(d[same])]] = True
+        return j, d, found
+
+    j, d, found = assign(xs, ys)
+    for _ in range(8):
+        if found.sum() < 3:
+            break
+        z = xo[j[found]] + 1j*yo[j[found]]; w = xt[found] + 1j*yt[found]
+        A = np.column_stack((z, np.conj(z), np.ones(z.size)))
+        M = np.vstack([np.column_stack([A.real, -A.imag]), np.column_stack([A.imag, A.real])])
+        c, *_ = np.linalg.lstsq(M, np.r_[w.real, w.imag], rcond=None)
+        cc = c[:3] + 1j*c[3:]
+        pz = np.column_stack((xo + 1j*yo, xo - 1j*yo, np.ones(xo.size))) @ cc
+        j2, d2, found2 = assign(pz.real, pz.imag)
+        if found2.sum() < found.sum():
+            break
+        improved = found2.sum() > found.sum()
+        j, d, found = j2, d2, found2
+        if not improved:
+            break
+    idx[found] = j[found]; resid[found] = d[found]
+    return idx, resid
+
+
+def _measure_spots(im, u, v, nwindow, sat_level):
+    """검출마다 창 안 최대 화소(peak, 배경 포함), 배경 뺀 합(flux), 포화 화소 수."""
+    peak = np.zeros(u.size); flux = np.zeros(u.size); nsat = np.zeros(u.size, int)
+    for k in range(u.size):
+        i0, j0 = int(round(u[k])), int(round(v[k]))
+        sub = im[max(j0-nwindow, 0):j0+nwindow+1, max(i0-nwindow, 0):i0+nwindow+1]
+        ring = im[max(j0-2*nwindow, 0):j0+2*nwindow+1, max(i0-2*nwindow, 0):i0+2*nwindow+1]
+        bg = np.median(ring)
+        peak[k] = sub.max(); flux[k] = (sub - bg).sum(); nsat[k] = int((sub >= sat_level).sum())
+    return peak, flux, nsat
+
+
+def spot_brightness(fits_path, target_file, threshold=1e3, min_dist=80, finder='sep', finder_opts=None,
+                    nwindow=40, magnification=None, sat_level=65000., groups=None, fid_tol=1.5, fib_tol=3.0,
+                    use_measured=None, n=8, show=True):
+    """fiber 와 fiducial 을 모두 켜고 찍은 한 장에서 peak 을 찾아 종류별(fiducial / fiber / sky·고정 / 기타)로
+    밝기를 나눠 본다. 노출시간을 정할 때 쓴다.
+
+    target_file : object.info (xp/yp 또는 각도). 살아 있는 fiber 목표 + fiducial 전체 패턴으로 매칭한다.
+                  끊어진 fiber(FIBER_EXCLUDE) 는 기대하지 않고, 고정된 positioner(FIBER_FIXED) 와
+                  sky fiber(SKY_FIBERS) 는 그 홀의 arm 범위 안에서 목표에 안 붙은 검출을 그것으로 본다.
+    fid_tol, fib_tol : 매칭 허용 거리 [mm] (fiber 는 positioner 오차만큼 크게).
+    반환: (T, summary, missing)
+      T       : 검출별 표 — id, kind, group(fiducial 그룹), peak(창 안 최대, 배경 포함), flux(배경 뺀 합),
+                nsat(포화 화소 수), resid_mm, u, v
+      summary : kind 별 기대 수·찾은 수·peak 최소/중앙/최대·포화 수
+      missing : {'fiducial': [...], 'fiber': [...]} 기대했는데 못 찾은 ID"""
+    import matplotlib.pyplot as plt
+    import pandas as pd
+    from scipy.spatial import cKDTree
+    from kspec_metrology.analysis.mtlcal import load_configuration
+    from kspec_metrology.analysis.utils import transform
+    groups = groups if groups is not None else cfg.FIDUCIAL_GROUPS
+    d = os.path.dirname(os.path.abspath(fits_path)); base = os.path.basename(fits_path)
+    if not base.endswith('0.fits'):
+        raise ValueError("파일 이름이 ...0.fits 로 끝나야 한다 (findpeak 의 이름 규칙)")
+    head = base[:-len('0.fits')]
+    im, xo, yo, _ = findpeak((1, 100000), data_dir=d, head=head, nexposure=1, threshold=threshold,
+                             niter_max=1, min_dist=min_dist, finder=finder, finder_opts=finder_opts,
+                             background='crop', nwindow=nwindow)
+    u, v = chip2pix(xo, yo, im.shape)
+    peak, flux, nsat = _measure_spots(im, u, v, nwindow, sat_level)
+
+    # 목표 패턴: 살아 있는 fiber + fiducial
+    xp, yp, kind_t = read_targets(target_file)
+    tf = target_file
+    if kind_t == 'ab':
+        import tempfile
+        a1, a2 = cfg.arm_lengths(use_measured)
+        with tempfile.NamedTemporaryFile('w', suffix='.info', delete=False) as f:
+            json.dump(dict(tile_id='lab', xp=[0.]*xp.size, yp=[0.]*yp.size), f)
+        try:
+            xo0, yo0, _, _, _, nfib0 = load_configuration(f.name, apply_zenith_offset=False, use_measured=use_measured)
+        finally:
+            os.remove(f.name)
+        xq, yq = ab2xy(xo0[:nfib0], yo0[:nfib0], xp, yp, a1, a2)
+        with tempfile.NamedTemporaryFile('w', suffix='.info', delete=False) as f:
+            json.dump(dict(tile_id='lab', xp=[float(q) for q in xq], yp=[float(q) for q in yq]), f); tf = f.name
+    _, _, x, y, fid_flag, nfib = load_configuration(tf, apply_zenith_offset=False, use_measured=use_measured)
+    if tf != target_file:
+        os.remove(tf)
+    ids = _all_ids()
+    dead = np.r_[cfg.dead_mask(), np.zeros(x.size - nfib, bool)]
+    xt, yt, ft = x[~dead], y[~dead], fid_flag[~dead]; ids_t = [i for i, dd in zip(ids, dead) if not dd]
+    idx, resid = _match_pattern(xt, yt, xo, yo, magnification=magnification, tol=np.where(ft, fid_tol, fib_tol))
+
+    label = np.array(['?']*u.size, dtype=object); kind = np.array(['other']*u.size, dtype=object)
+    res_col = np.full(u.size, np.nan)
+    for i, j in enumerate(idx):
+        if j >= 0:
+            label[j] = ids_t[i]; kind[j] = 'fiducial' if ft[i] else 'fiber'; res_col[j] = resid[i]
+    # 목표에 안 붙은 검출 가운데 고정/sky 홀의 arm 범위 안이면 그것으로
+    holes = cfg.lit_unmatched_holes()
+    if len(holes) and (kind == 'other').any():
+        f = idx >= 0
+        if f.sum() >= 3:
+            z = xo[idx[f]] + 1j*yo[idx[f]]; w = xt[f] + 1j*yt[f]
+            A = np.column_stack((z, np.conj(z), np.ones(z.size)))
+            M = np.vstack([np.column_stack([A.real, -A.imag]), np.column_stack([A.imag, A.real])])
+            c, *_ = np.linalg.lstsq(M, np.r_[w.real, w.imag], rcond=None); cc = c[:3] + 1j*c[3:]
+            pz = np.column_stack((xo + 1j*yo, xo - 1j*yo, np.ones(xo.size))) @ cc
+            a1, a2 = cfg.arm_lengths(); reach = float((a1 + a2).max()) + 1.0
+            hx = np.array([h[0] for h in holes]) if not isinstance(holes, np.ndarray) else holes[:, 0]
+            hy = np.array([h[1] for h in holes]) if not isinstance(holes, np.ndarray) else holes[:, 1]
+            dh, _ = cKDTree(np.column_stack((hx, hy))).query(np.column_stack((pz.real, pz.imag)))
+            kind[(kind == 'other') & (dh < reach)] = 'sky/fixed'
+    gname = {m: g for g, members in groups.items() for m in members} if groups else {}
+    grp = np.array([gname.get(l, '') for l in label], dtype=object)
+    near = np.array(['']*u.size, dtype=object)
+    f = idx >= 0
+    if f.sum() >= 3:                                   # 안 붙은 검출: 가장 가까운 살아 있는 fiber 목표와 거리
+        z = xo[idx[f]] + 1j*yo[idx[f]]; w = xt[f] + 1j*yt[f]
+        A = np.column_stack((z, np.conj(z), np.ones(z.size)))
+        M = np.vstack([np.column_stack([A.real, -A.imag]), np.column_stack([A.imag, A.real])])
+        c, *_ = np.linalg.lstsq(M, np.r_[w.real, w.imag], rcond=None); cc = c[:3] + 1j*c[3:]
+        pz = np.column_stack((xo + 1j*yo, xo - 1j*yo, np.ones(xo.size))) @ cc
+        dn, jn = cKDTree(np.column_stack((xt[~ft], yt[~ft]))).query(np.column_stack((pz.real, pz.imag)))
+        fib_ids = [i for i, flag in zip(ids_t, ft) if not flag]
+        for k in np.where(kind == 'other')[0]:
+            near[k] = f'{fib_ids[jn[k]]} {dn[k]:.1f} mm'
+    T = pd.DataFrame(dict(id=label, kind=kind, group=grp, peak=peak, flux=flux, nsat=nsat, resid_mm=res_col, u=u, v=v,
+                          nearest_fiber=near))
+    order = {'fiducial': 0, 'fiber': 1, 'sky/fixed': 2, 'other': 3}
+    T['_o'] = T.kind.map(order); T = T.sort_values(['_o', 'group', 'id']).drop(columns='_o').reset_index(drop=True)
+
+    n_exp = {'fiducial': int(ft.sum()), 'fiber': int((~ft).sum()),
+             'sky/fixed': len(cfg.FIBER_FIXED) + len(cfg.SKY_FIBERS), 'other': 0}
+    rows = []
+    for k in order:
+        F = T[T.kind == k]
+        rows.append(dict(kind=k, expected=n_exp[k], found=len(F),
+                         peak_min=F.peak.min() if len(F) else np.nan, peak_median=F.peak.median() if len(F) else np.nan,
+                         peak_max=F.peak.max() if len(F) else np.nan, flux_median=F.flux.median() if len(F) else np.nan,
+                         n_sat=int((F.nsat > 0).sum())))
+    summary = pd.DataFrame(rows).set_index('kind')
+    missing = {'fiducial': [ids_t[i] for i in range(len(ids_t)) if ft[i] and idx[i] < 0],
+               'fiber': [ids_t[i] for i in range(len(ids_t)) if not ft[i] and idx[i] < 0]}
+    print(f"{base}: {u.size} peaks (threshold {threshold:.0f}); broken (not expected): {list(cfg.FIBER_EXCLUDE) or '-'}; "
+          f"fixed: {list(cfg.FIBER_FIXED) or '-'}; sky: {len(cfg.SKY_FIBERS)}")
+    for k in ('fiducial', 'fiber'):
+        r = summary.loc[k]
+        print(f"  {k:9s}: {int(r.found)}/{int(r.expected)} found, {int(r.n_sat)} saturated, peak {r.peak_min:.0f}..{r.peak_max:.0f} (median {r.peak_median:.0f})"
+              + (f"; missing: {', '.join(missing[k])}" if missing[k] else ''))
+    print(f"  sky/fixed: {int(summary.loc['sky/fixed'].found)}/{n_exp['sky/fixed']}; other: {int(summary.loc['other'].found)}"
+          + (" (" + "; ".join(f"peak {r.peak:.0f} near {r.nearest_fiber}" for _, r in T[T.kind == 'other'].iterrows()) + ")"
+             if (T.kind == 'other').any() else ''))
+    # 노출 제안: 가장 밝은 것이 포화 수준의 절반쯤 오도록 (포화된 것은 실제 peak 을 모르므로 상한만)
+    for k in ('fiducial', 'fiber'):
+        F = T[T.kind == k]
+        if not len(F):
+            continue
+        if (F.nsat > 0).any():
+            print(f"  {k}: {int((F.nsat > 0).sum())} saturated -> exposure must drop by more than x{0.5*sat_level/F.peak.max():.2f} "
+                  f"(true peak unknown); for a split exposure measure the fiducial frame separately")
+        else:
+            print(f"  {k}: brightest {F.peak.max():.0f} -> x{0.5*sat_level/F.peak.max():.2f} brings it to 50 % of saturation; "
+                  f"dimmest {F.peak.min():.0f} = {F.peak.min()/threshold:.1f} x threshold")
+    if show:
+        colors = {'fiducial': 'tab:orange', 'fiber': 'c', 'sky/fixed': 'm', 'other': 'gray'}
+        ax = show_image(im, n, title=f'{base}: orange = fiducial, cyan = fiber, magenta = sky/fixed, gray = other; red ring = saturated')
+        r0 = max(60, min_dist)
+        for _, r in T.iterrows():
+            c = 'red' if r.nsat > 0 else colors[r.kind]
+            ax.add_artist(plt.Circle((r.u, r.v), r0, fc='none', ec=c, lw=1.0 if r.kind != 'other' else 0.6))
+            if r.kind in ('fiducial', 'fiber'):
+                ax.text(r.u, r.v + 1.6*r0, f'{r.id}:{r.peak:.0f}', color=colors[r.kind], fontsize=6, ha='center', va='bottom',
+                        bbox=dict(fc='k', ec='none', alpha=0.4, pad=0.5))
+        fig, axs = plt.subplots(2, 1, figsize=(14, 7))
+        for a, k in zip(axs, ('fiducial', 'fiber')):
+            F = T[T.kind == k].sort_values('peak')
+            a.bar(range(len(F)), F.peak, color=colors[k], edgecolor=['red' if s_ > 0 else 'none' for s_ in F.nsat], linewidth=1.2)
+            a.axhline(sat_level, color='red', ls='--', lw=0.8); a.axhline(threshold, color='gray', ls=':', lw=0.8)
+            a.set_yscale('log'); a.set_ylim(max(50., threshold/5.), sat_level*1.6)
+            a.set_xticks(range(len(F))); a.set_xticklabels(F.id, rotation=90, fontsize=7); a.set_ylabel('peak [ADU]')
+            a.set_title(f"{k}: {len(F)}/{n_exp[k]} found, {int((F.nsat > 0).sum())} saturated (red edge); missing: {', '.join(missing[k]) or 'none'}", fontsize=9)
+        fig.tight_layout()
+    return T, summary, missing
+
+
 def plot_group_brightness(T, groups=None, sat_level=65000., threshold=None, ax=None, title=None):
     """fiducial_brightness 의 표 T 로 그룹별 peak 막대 그림. 포화 수준·검출 문턱 선 포함.
     못 찾은 fiducial(그룹에는 있는데 표에 없음) 은 빈 자리로 표시한다."""

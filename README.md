@@ -610,6 +610,17 @@ T, S = lab.fiducial_brightness('fid_10ms_0.fits', threshold=1e3, min_dist=80, ma
 찍힌 이미지면 `target_file=` 로 object.info 를 줘야 fiducial 라벨이 바르게 붙는다 (fiber 와 fiducial 이
 같은 격자라 fiducial 패턴만으로는 회전이 정해지지 않는다). 노트북 `notebooks/Fiducial_Brightness.ipynb`.
 
+## 노출시간 정하기 (fiber + fiducial 을 같이 켠 한 장)
+
+```python
+T, S, missing = lab.spot_brightness('fib_400ms_0.fits', 'object.info', threshold=1e3, min_dist=80, magnification=8.40)
+```
+
+peak 을 찾아 fiducial / fiber / sky·고정 positioner / 기타 로 나눠 종류별 peak 범위·포화 수를 낸다. 끊어진
+fiber(`FIBER_EXCLUDE`) 는 기대하지 않고, 기대했는데 못 찾은 ID 는 `missing` 에, 어디에도 안 붙은 검출은
+`other` 에 가장 가까운 fiber 와 거리를 붙여 준다. 가장 밝은 것이 포화의 절반에 오도록 노출 배율을 제안한다
+(포화된 종류는 하한만). 노트북 `notebooks/Exposure_Check.ipynb`.
+
 ## positioner 회전 중심 · arm 길이 측정 (arm scan)
 
 `analysis/armcal.py`. beta 를 고정하고 alpha 를 한 바퀴 돌리며 찍은 이미지들에서

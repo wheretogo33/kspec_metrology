@@ -9,6 +9,7 @@
 | `Calibration_Run.ipynb` | 모든 arm 을 같은 각도(또는 같은 offset)로 둔 배치의 측정. 목표 파일을 각도로 만들고 같은 흐름으로 |
 | `Arm_Scan.ipynb` | alpha 를 돌리며 찍은 이미지들로 positioner 회전 중심(과 arm 길이) 을 원 fit 으로 구해 `Measured_Geometry` 형식으로 쓴다 |
 | `take_exposure.py` | 시험 촬영 스크립트: 원하는 노출시간으로 찍어 원하는 이름으로 저장 (`--help`). `--fiber 400 --fid 2 10` 으로 fiber 1장 + fiducial 2장을 한 세트로. fiducial 밝기 조정 때 노트북과 같이 쓴다 |
+| `Exposure_Check.ipynb` | fiber 와 fiducial 을 모두 켠 한 장에서 peak 을 찾아 fiducial / fiber / sky·고정 / 기타로 나눠 밝기를 보고 노출시간을 정한다 (끊어진 fiber 는 기대하지 않음, 못 찾은 것·포화 표시, 노출 배율 제안) |
 | `Fiducial_Brightness.ipynb` | 본 측정 전 fiducial 밝기 조정: fiducial 노출에서 peak 을 찾아 ID 와 peak 값을 그림에 적고 (포화 표시), 그룹별 요약표 |
 
 노트북 모두 첫 셀에서 패키지 경로와 설정(끊어진 fiber, 고정된 positioner, sky fiber,
