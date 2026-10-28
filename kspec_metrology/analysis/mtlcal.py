@@ -257,18 +257,18 @@ def _flatten_angles(theta, phi, absolute=True):
     """fiber 순서의 (theta, phi)를 (alpha, beta)가 번갈아 놓인 degree 배열로 편다.
 
     출력은 positioner 명령각이다: 명령각 = fiber_config.ANGLE_SIGN x 계산각 - fiber_config.ANGLE_ZERO
-    (기본 부호 (1, 1): alpha 반시계 양, beta >= 0; 기본 영점 (30, 150) = positioner 의 (0, 0)).
-    absolute=False 면 회전량(차이)이라 영점을 빼지 않는다.
+    (부호와 영점은 fiber_config 참고; 기하각 (30, 150) = positioner 의 (0, 0)).
+    absolute=True 면 alpha 는 경로 계획기와 같은 범위의 절대각이다 (fiber_config.command_alpha).
+    absolute=False 면 회전량(차이)이라 영점을 빼지 않고 alpha 를 짧은 쪽 (-180, 180] 로 접는다.
     """
     sa, sb = cfg.ANGLE_SIGN
-    za, zb = cfg.ANGLE_ZERO if absolute else (0., 0.)
     angles = np.empty(2*theta.size)
-    alpha = sa*theta*rtod - za
     if absolute:
-        angles[0::2] = cfg.wrap_alpha(alpha)               # positioner 가 받는 범위 [-330, 30) 로
+        angles[0::2] = cfg.command_alpha(theta)
+        angles[1::2] = sb*phi*rtod - cfg.ANGLE_ZERO[1]
     else:
-        angles[0::2] = (alpha + 180.) % 360. - 180.       # 회전량: 가까운 쪽 (-180, 180]
-    angles[1::2] = sb*phi*rtod - zb
+        angles[0::2] = (sa*theta*rtod + 180.) % 360. - 180.
+        angles[1::2] = sb*phi*rtod
 
     return angles
 
@@ -1141,13 +1141,6 @@ def mtlcal(data_dir='./MTL/data/'
         prev = _flatten_angles(theta_true, phi_true)
 
     angle_cum = prev + angle_rot
-    angle_cum[0::2] = cfg.wrap_alpha(angle_cum[0::2])          # 누적 alpha 도 positioner 범위 [-330, 30) 로
-    out_b = np.isfinite(angle_cum[1::2]) & ((angle_cum[1::2] < cfg.BETA_RANGE[0]) | (angle_cum[1::2] > cfg.BETA_RANGE[1]))
-    if out_b.any():
-        ids_b = list(cfg.fiber_ids())
-        log.warning("cumulative beta outside the positioner range %s for %s -- clipped (arm at its end stop)",
-                    cfg.BETA_RANGE, ", ".join(f"{ids_b[i]} ({angle_cum[2*i+1]:.1f})" for i in np.where(out_b)[0]))
-        angle_cum[1::2] = cfg.clip_beta(angle_cum[1::2])
 
     if json_dir is not None and target_name is not None:
         np.save(naming.coeff_path(json_dir, target_name, itrial), coeff)   # 다음 trial 의 Predict 가 읽는다
